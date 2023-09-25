@@ -15,6 +15,7 @@ def setup_store():
     parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
     parser.add_argument("--block_size", type=int, default=2048)
     parser.add_argument("--padding", type=_tobool, default=False)
+    parser.add_argument("--overlap", type=int, default=0)
     parser.add_argument("--split", default=DEFAULT_SPLIT)
     parser.add_argument("--store_path", default="store")
     parser.add_argument("--N", type=int, default=None)
@@ -29,7 +30,7 @@ def main_store():
                          split=hparams.split, 
                          block_size=hparams.block_size, 
                          dir=hparams.store_path)
-    store.upload(filename=hparams.files[0], N=hparams.N)
+    store.upload(filename=hparams.files[0], padding=hparams.padding, overlap=hparams.overlap, N=hparams.N)
 
 
 
