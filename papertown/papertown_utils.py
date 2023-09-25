@@ -13,7 +13,7 @@ def safe_join(dir, file):
     return f'{dir}/{file}'
 
 DEFAULT_TOKENIZER = os.environ.get('PT_TOKENIZER', 'kkuramitsu/spm-pt32k')
-DEFAULT_VERSION='v1_'
+DEFAULT_SPLIT='train'
 DEFAULT_CACHE_DIR = safe_dir(os.environ.get('PT_CACHE_DIR', '.'))
 
 

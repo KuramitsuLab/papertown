@@ -4,12 +4,18 @@ import argparse
 from papertown import DatasetStore, DataComposer, load_tokenizer
 from tqdm import tqdm
 
+from .papertown_utils import *
+
+def _tobool(s):
+    return s.lower() == 'true'
+
 def setup_store():
     parser = argparse.ArgumentParser(description="papertown_store")
     parser.add_argument("files", type=str, nargs="+", help="files")
-    parser.add_argument("--tokenizer_path", default='kkuramitsu/spm-pt32k')
+    parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
     parser.add_argument("--block_size", type=int, default=2048)
-    parser.add_argument("--version", default='v1')
+    parser.add_argument("--padding", type=_tobool, default=False)
+    parser.add_argument("--split", default=DEFAULT_SPLIT)
     parser.add_argument("--store_path", default="store")
     parser.add_argument("--N", type=int, default=None)
     parser.add_argument("--num_works", type=int, default=0)
@@ -20,7 +26,7 @@ def main_store():
     hparams = setup_store()
     tokenizer = load_tokenizer(hparams.tokenizer_path)
     store = DatasetStore(tokenizer=tokenizer, 
-                         version=hparams.version, 
+                         split=hparams.split, 
                          block_size=hparams.block_size, 
                          dir=hparams.store_path)
     store.upload(filename=hparams.files[0], N=hparams.N)

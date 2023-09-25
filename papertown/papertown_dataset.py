@@ -47,15 +47,6 @@ def get_file_lines(filepath):
             c+=1
     return c
 
-def _read_text_from_line(line, key, sep=None):
-    if key is None and sep is None:
-        return line.rstrip()
-    d = json.loads(line)
-    if sep is not None and 'out' in d:
-        # 後方互換性のための
-        return f"{d['in']}{sep}{d['out']}"
-    return d[key]
-
 def _remove_heading_nL(s):
     while s.startswith('<nL>'):
         s = s[4:]
@@ -173,9 +164,9 @@ def tokenize_block_sep(tokenizer, blocks: List[List[int]], text:str,
         if len(chunk) >= block_size:
             blocks.append(chunk[:block_size])
             if block_size - prev_length < overlap:
-                chunk = [_block_simply(blocks, ids, block_size)]
+                chunk = _block_simply(blocks, ids, block_size)
             else:
-                chunk = [_block_simply(blocks, chunk[block_size:], block_size)]
+                chunk = _block_simply(blocks, chunk[block_size:], block_size)
     if len(chunk) > 4:
         return _block_simply(blocks, chunk, block_size, fill)
     return fill
@@ -268,7 +259,7 @@ def stat_tokens(counts):
         'min': int(np.min(data)),
     }
 
-def safe_version(s):
+def safe_split(s):
     s = str(s)
     if not s.endswith('_'):
         return f'{s}_'
@@ -287,21 +278,21 @@ class DatasetStore(object):
         self.block_size = self.config.get("block_size", DEFAULT_BLOCK_SIZE)
         self.file_ext = self.config.get("file_ext", "npz")
         self.n_chunks = self.config.get("n_chunks", N_CHUNKS)
+        self.split_prefix = safe_split(self.config.get('split', DEFAULT_SPLIT))
         self.shuffle = self.config.get("shuffle", False)
-        self.version = safe_version(self.config.get('version', DEFAULT_VERSION))
         self.chunkseq = 0
         self.bufs = []
         self.n_items = 0
         self.token_counts = []
 
     def save_config(self):
-        config_file = f"{self.dir}/{self.version}config.json"
+        config_file = f"{self.dir}/{self.split_prefix}config.json"
         with open(config_file, "w") as w:
             json.dump(self.config, w)
     
     def save(self, save_config=True):
         if len(self.bufs) > 0:
-            save_chunk(self.dir, self.chunkseq, self.version, self.file_ext, self.bufs)
+            save_chunk(self.dir, self.chunkseq, self.split_prefix, self.file_ext, self.bufs)
             self.n_items += len(self.bufs)
             if len(self.bufs) == self.n_chunks:
                 self.chunkseq += 1
@@ -333,10 +324,12 @@ class DatasetStore(object):
             update_fn=self.extend, 
             block_size=self.block_size, padding=padding, overlap=overlap, sep=sep
         )
+        self.save()
         verbose_print(f'Tokens: {self.n_tokens:,} Items: {self.n_items:,} Blocks: {self.block_size:,}')
 
 
 from pathlib import Path
+import time
 
 def get_file_size(file_path):
     if os.path.exists(file_path) and os.path.isfile(file_path):
@@ -347,8 +340,6 @@ def get_file_size(file_path):
 def touch(file_path):
     file = Path(file_path)
     file.touch(exist_ok=True)
-
-import time
 
 def wait_for_file(file_path, timeout=60):
     """
@@ -364,7 +355,6 @@ def wait_for_file(file_path, timeout=60):
             return True  # ファイルが見つかった
         time.sleep(1)  # 1秒待つ
     return False  # タイムアウト
-
 
 def resolve_file(url_base, file_path, cache_dir, sync=True):
     remote_file = safe_join(url_base, file_path)
@@ -425,12 +415,12 @@ def url_to_hash(url):
     return hashlib.md5(url.encode()).hexdigest()
 
 class ChunkedDataset(Dataset):
-    def __init__(self, url, version, block_size=None, lock_file=None, cache_dir=".", prefetch=3, **kwargs):
+    def __init__(self, url, split=DEFAULT_SPLIT, block_size=None, lock_file=None, cache_dir=".", prefetch=1, **kwargs):
         """
         block_size=Noneのときは、再分割しない
         """
         self.url = safe_dir(url)
-        self.version = version
+        self.split_prefix = safe_split(split)
         self.cache_dir = f'{safe_dir(cache_dir)}/{url_to_hash(url)}'
         self.lock_file = lock_file
         self.config = self.load_config(kwargs)
@@ -453,7 +443,7 @@ class ChunkedDataset(Dataset):
 
     def load_config(self, kwargs: dict):
         with _FileLock(self.lock_file):
-            config_file = resolve_file(self.url, f'{self.version}config.json', self.cache_dir)
+            config_file = resolve_file(self.url, f'{self.split_prefix}config.json', self.cache_dir)
         try:
             with open(config_file) as f:
                 config = json.load(f)
@@ -489,14 +479,14 @@ class ChunkedDataset(Dataset):
         return chunks
 
     def try_prefetch(self, chunkseq):
-        filepath = chunkseq_to_filepath(chunkseq % self.max_chunkseq, self.version, 'npz')
+        filepath = chunkseq_to_filepath(chunkseq % self.max_chunkseq, self.split_prefix, 'npz')
         resolve_file(self.url, filepath, self.cache_dir, sync=False)
 
     def __getitem__(self, index):
         offset = index % self.block_split
         i = index // self.block_split
         chunkseq = i // self.n_chunks
-        filepath = chunkseq_to_filepath(chunkseq, self.version, 'npz')
+        filepath = chunkseq_to_filepath(chunkseq, self.split_prefix, 'npz')
         chunks = self.get_chunks(filepath)
         if self.prefetch > 0 and index % self.n_chunks == 0:
             self.try_prefetch(chunkseq+self.prefetch)
@@ -546,14 +536,16 @@ class FileDataset(Dataset):
         self.chunks = self.chunks[start:end]
         return 0, length
 
-def _parse_split(url, version):
+def _parse_split(url, split):
     start, end = '', ''
     if '[' in url and url.endswith(']'):
         url, _, split = url.rpartition('[')
         start, end = split[:-1].split(':')
     if '?' in url:
-        url, _, version = url.rpartition('?')
-    return url, version, start, end
+        url, _, split = url.rpartition('?')
+        if split.startswith('split='):
+            split = split[6:]
+    return url, split, start, end
 
 def _parse_range(start, end, n_items):
     try:
@@ -627,7 +619,7 @@ def parse_url_list(url_list=[]):
     return url_list
 
 class DataComposer(Dataset):
-    def __init__(self, url_list, version = DEFAULT_VERSION, 
+    def __init__(self, url_list, split = DEFAULT_SPLIT, 
                  max_length=DEFAULT_MAX_LENGTH, block_size=None,
                  build_fn=build_inputs_for_clm, tokenizer=None, shuffle=True,
                  cache_dir = DEFAULT_CACHE_DIR, use_filelock=True, prefetch=1):
@@ -637,7 +629,7 @@ class DataComposer(Dataset):
         else:
             self.max_length = min(max_length, block_size)
             self.padding=False
-        self.version = safe_version(version)
+        self.split = split
         self.cache_dir = f'{safe_dir(cache_dir)}/{random_name()}'
         os.makedirs(self.cache_dir, exist_ok=True)
         self.lock_file = f'{self.cache_dir}/lock' if use_filelock else None
@@ -650,14 +642,14 @@ class DataComposer(Dataset):
         self.n_tokens = 0
         datasets = []
         for i, url in enumerate(urls):
-            url, version, start, end = _parse_split(url, self.version)
+            url, split, start, end = _parse_split(url, self.split)
             if url.endswith('.gz') or url.endswith('.jsonl') or url.endswith('.txt'):
                 if tokenizer is None:
                     verbose_print(f'トークンナイザーの指定がないので DEFAULT_TOKENIZER={DEFAULT_TOKENIZER}を使います')
                     tokenizer = load_tokenizer(DEFAULT_TOKENIZER)
                 dataset = FileDataset(tokenizer, url, max_length=self.max_length, padding=self.padding)
             else:
-                dataset = ChunkedDataset(url, version=version, block_size=block_size, 
+                dataset = ChunkedDataset(url, split=split, block_size=block_size, 
                                          lock_file=self.lock_file, prefetch=self.prefetch,
                                          cache_dir=self.cache_dir)
             if len(dataset) == 0:
