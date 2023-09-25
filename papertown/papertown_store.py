@@ -11,7 +11,7 @@ def setup_store():
     parser.add_argument("--block_size", type=int, default=2048)
     parser.add_argument("--version", default='v1')
     parser.add_argument("--store_path", default="store")
-    parser.add_argument("-N", type=int, default=None)
+    parser.add_argument("--N", type=int, default=None)
     parser.add_argument("--num_works", type=int, default=0)
     hparams = parser.parse_args()  # hparams になる
     return hparams
