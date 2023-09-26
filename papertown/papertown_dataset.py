@@ -259,7 +259,7 @@ def stat_tokens(counts):
         'min': int(np.min(data)),
     }
 
-def safe_split(s):
+def safe_splitprefix(s):
     s = str(s)
     if not s.endswith('_'):
         return f'{s}_'
@@ -278,7 +278,7 @@ class DatasetStore(object):
         self.block_size = self.config.get("block_size", DEFAULT_BLOCK_SIZE)
         self.file_ext = self.config.get("file_ext", "npz")
         self.n_chunks = self.config.get("n_chunks", N_CHUNKS)
-        self.split_prefix = safe_split(self.config.get('split', DEFAULT_SPLIT))
+        self.split_prefix = safe_splitprefix(self.config.get('split', DEFAULT_SPLIT))
         self.shuffle = self.config.get("shuffle", False)
         self.chunkseq = 0
         self.bufs = []
@@ -420,7 +420,7 @@ class ChunkedDataset(Dataset):
         block_size=Noneのときは、再分割しない
         """
         self.url = safe_dir(url)
-        self.split_prefix = safe_split(split)
+        self.split_prefix = safe_splitprefix(split)
         self.cache_dir = f'{safe_dir(cache_dir)}/{url_to_hash(url)}'
         self.lock_file = lock_file
         self.config = self.load_config(kwargs)

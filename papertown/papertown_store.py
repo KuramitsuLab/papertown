@@ -13,11 +13,11 @@ def setup_store():
     parser = argparse.ArgumentParser(description="papertown_store")
     parser.add_argument("files", type=str, nargs="+", help="files")
     parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
+    parser.add_argument("--store_path", default="store")
     parser.add_argument("--block_size", type=int, default=2048)
     parser.add_argument("--padding", type=_tobool, default=False)
     parser.add_argument("--overlap", type=int, default=0)
     parser.add_argument("--split", default=DEFAULT_SPLIT)
-    parser.add_argument("--store_path", default="store")
     parser.add_argument("--N", type=int, default=None)
     parser.add_argument("--num_works", type=int, default=0)
     hparams = parser.parse_args()  # hparams になる
