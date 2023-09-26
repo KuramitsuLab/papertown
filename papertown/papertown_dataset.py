@@ -1,6 +1,7 @@
 import os
 import time
 import random
+from pathlib import Path
 
 import json
 import shutil
@@ -19,6 +20,7 @@ from torch.utils.data import Dataset
 
 from .papertown_utils import *
 from .papertown_tokenizer import *
+from .splitter import TextBlockSplitter
 
 _ID = 0
 def random_name():
@@ -32,110 +34,161 @@ DEFAULT_BLOCK_SIZE = 2048
 DEFAULT_MAX_LENGTH = 4096
 N_CHUNKS = 4096
 
-def zopen(filepath):
-    if filepath.endswith('.gz'):
-        return gzip.open(filepath, 'rt')
-    else:
-        return open(filepath, 'r')
+# ファイルシステム
 
-def get_file_lines(filepath):
-    with zopen(filepath) as f:
-        line = f.readline()
-        c=1
-        while line:
-            line = f.readline()
-            c+=1
-    return c
+def join_path(dir, file):
+    if file is None: 
+        return dir
+    if dir.endswith('/'):
+        dir = dir[:-1]
+    if file.startswith('/'):
+        file = file[1:]
+    return f'{dir}/{file}'
 
 def _remove_heading_nL(s):
     while s.startswith('<nL>'):
         s = s[4:]
     return s
 
+def _makedirs(path):
+    dir, _,  file = path.rpartition("/")
+    if '.' in file: #拡張子が含まれる場合
+        os.makedirs(dir,  exist_ok=True)
+    elif not os.path.isfile(path):
+        os.makedirs(path,  exist_ok=True)
 
-def chunkseq_to_filepath(chunkseq:int, prefix:str, file_ext:str):
+def get_file_sha1(filepath: str):
+    # ファイルをバイナリモードで読み込む
+    with open(filepath, 'rb') as f:
+        # ファイルの内容を読み込む
+        content = f.read()
+        # SHA-1ハッシュオブジェクトを作成
+        sha1 = hashlib.sha1()
+        # ファイルの内容をハッシュオブジェクトに追加
+        sha1.update(content)
+        # 16進数でハッシュ値を取得
+        sha1_hexdigest = sha1.hexdigest()
+    return sha1_hexdigest
+
+def get_filesize(file_path):
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return os.path.getsize(file_path)
+    else:
+        return -1
+
+def touch(file_path):
+    file = Path(file_path)
+    file.touch(exist_ok=True)
+
+def wait_for_file(file_path, timeout=60):
+    """
+    指定されたファイルが存在するかを定期的にチェックし、
+    タイムアウトまでにファイルが見つかった場合は True を返します。
+    タイムアウトした場合は False を返します。
+    """
+    start_time = time.time()
+    end_time = start_time + timeout
+    while time.time() < end_time:
+        if get_filesize(file_path) > 0:
+            verbose_print(f'{time.time()-start_time} 秒, 待ちました')
+            return True  # ファイルが見つかった
+        time.sleep(1)  # 1秒待つ
+    return False  # タイムアウト
+
+def resolve_file(url_base, file_path, cache_dir, sync=True):
+    remote_file = safe_join(url_base, file_path)
+    if remote_file.startswith('/'):
+        # ローカルなファイルパスの場合
+        return remote_file
+    cache_file = safe_join(cache_dir, file_path)
+    # ディレクトリを作っておく
+    os.makedirs(cache_file.rpartition("/")[0], exist_ok=True)
+    cache_file_size = get_filesize(cache_file)
+    #print('@', cache_file_size, cache_file)
+    if cache_file_size > 0:
+        return cache_file
+
+    # ダウンロードコマンド
+    if remote_file.startswith('file:'):
+        remote_file = os.path.abspath(remote_file[5:]) # file: をとる
+        cmd = f'cp {remote_file} {cache_file}'
+    else:
+        cmd = f"wget -qO {cache_file}.tmp {remote_file} && mv {cache_file}.tmp {cache_file}"
+
+    if sync:
+        if cache_file_size == 0:
+            verbose_print('ダウンロード中 最大30秒待ちます.', remote_file)
+            if wait_for_file(cache_file, 30):
+                return cache_file
+        touch(cache_file)
+        subprocess.call(cmd, shell=True)
+        verbose_print(f'Downloaded {get_filesize(cache_file):,} bytes:', cmd)
+        return cache_file
+
+    if get_filesize(cache_file) == -1:
+        touch(cache_file)
+        verbose_print('プレフェッチ', remote_file)
+        subprocess.call(f"{cmd} &", shell=True, stderr=subprocess.DEVNULL)
+    # else:
+    #     verbose_print('既にダウンロード中..', remote_file)
+    return None
+
+def chunkseq_to_filename(chunkseq:int, prefix:str, file_ext:str):
     dir = f"{(chunkseq//100):04d}"
     return f"{dir}/{prefix}{(chunkseq%100):02d}.{file_ext}"
 
+def save_chunk_file(base_dir:str, chunk_file:str, chunks:List[np.ndarray]):
+    filepath = join_path(base_dir, chunk_file)
+    _makedirs(filepath)
+    if filepath.endswith('.npz'):
+        np.savez_compressed(filepath, *chunks)
+    return {'filesize': get_filesize(filepath), 
+            'sha1': get_file_sha1(filepath)}
 
-def chunk_filename(dir:str, chunkseq:int, prefix:str, file_ext:str, mkdir=True):
-    dir = f"{dir}/{(chunkseq//100):04d}"
-    if mkdir and not os.path.exists(dir):
-        os.makedirs(dir, exist_ok=True)
-    return f"{dir}/{prefix}{(chunkseq%100):02d}.{file_ext}"
+def load_chunk_file(base_dir:str, chunk_file:str=None):
+    filepath = join_path(base_dir, chunk_file)
+    try:
+        #if filepath.endswith('.npz'):
+        npz = np.load(filepath)
+        return [npz[n] for n in npz.files]
+    except BaseException as e:
+        verbose_print(f'broken chunk file {chunk_file}: {e}')
+        return None
 
+def check_chunk_file(base_dir:str, chunk_file:str, checks: dict):
+    filepath = join_path(base_dir, chunk_file)
+    if 'filesize' in checks:
+        if get_filesize(filepath) != checks['filesize']:
+            return False
+    if 'sha1' in checks:
+        if get_file_sha1(filepath) != checks['sha1']:
+            return False
+    return True
 
-def save_chunk(dir, chunkseq, prefix, file_ext, chunks):
-    filename = chunk_filename(dir, chunkseq, prefix, file_ext)
-    if filename.endswith('.npz'):
-        np.savez_compressed(filename, *chunks)
+def make_chunk_filelist(base_dir:str, chunk_files:List[str]):
+    d = {}
+    for chunk_file in chunk_files:
+        if not load_chunk_file(base_dir, chunk_file):
+            return None
+        filepath = safe_join(base_dir, chunk_file)
+        checks = {'filesize': get_filesize(filepath), 'sha1': get_file_sha1(filepath)}
+        if not check_chunk_file(base_dir, chunk_file, checks):
+            verbose_print(f'broken chunk file {chunk_file}')
+            return None
+        d[chunk_file] = checks
+    return d
 
-def load_chunk_npz(filename):
-    npz = np.load(filename)
-    return [npz[n] for n in npz.files]
-
-def load_chunk(dir: str, chunkseq: int, prefix: str, file_ext: str):
-    filename = chunk_filename(dir, chunkseq, prefix, file_ext, mkdir=False)
-    if filename.endswith(".npz"):
-        chunks = load_chunk_npz(filename)
-    return chunks
+def shuffle_chunk_files(base_dir:str, chunk_file:str, chunk_file2:str):
+    assert chunk_file != chunk_file2
+    chunks = load_chunk_file(base_dir, chunk_file)
+    chunks2 = load_chunk_file(base_dir, chunk_file2)
+    length = len(chunks)
+    merged_chunks = chunks+chunks2
+    random.shuffle(merged_chunks)
+    save_chunk_file(base_dir, chunk_file, merged_chunks[:length])
+    save_chunk_file(base_dir, chunk_file, merged_chunks[length:])
 
 """
-def _tokenize_block_simply(blocks: List[List[int]], tokens: List[int], fill=None, block_size=256, overlap=False):
-    # とりあえず、シンプルにブロックを分割する
-    for i in range(0, len(tokens) - block_size + 1, block_size):  
-        segmented = tokens[i : i + block_size]
-        blocks.append(segmented)
-    remaining = len(tokens) % block_size
-    # 最後の分割が揃っていればおしまい
-    if remaining == 0:
-        return fill
-    # オーバーラップが有効ならオーバラップを検討する
-    if overlap and len(tokens) > block_size:
-        blocks.append(tokens[-block_size:])
-        return fill
-    if fill is None:
-        return tokens[-remaining:]
-    fill = tokens[-remaining:] + fill
-    if len(fill) >= block_size:
-        segmented = fill[:block_size]
-        blocks.append(segmented)
-        fill = fill[block_size:]
-    return fill
-    
-def tokenize_block_by_line(tokenizer, blocks, text, fill=None, block_size=256, nL_id = None):
-    if '<nL><nL>' in text:
-        lines = text.split('<nL><nL>')
-        NL = [nL_id, nL_id]
-    else:
-        lines = text.split('<nL>')
-        NL = [nL_id]
-    buffer = []
-    for line in lines:
-        overlap = len(buffer) > (block_size // 2)
-        tokens = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(line))+NL
-        buffer.extend(tokens)
-        if len(buffer) >= block_size:
-            _, remain = _tokenize_block_simply(blocks, buffer, fill=None, block_size=block_size)
-            buffer = [] if remain is None else remain
-            if overlap and len(tokens) < block_size:
-                buffer = tokens
-    tokens = tokenizer.build_inputs_with_special_tokens(buffer)
-    return _tokenize_block_simply(blocks, tokens, fill, block_size, overlap=True)
-
-def tokenize_block(tokenizer, text, fill=None, block_size=256, by_line=False, overlap=False):
-    blocks = []
-    text = text.replace('\r\n', '<nL>').replace('\n', '<nL>')
-    if by_line:
-        nL_id=tokenizer.newline_token_id
-        if nL_id is not None:
-            fill = tokenize_block_by_line(tokenizer, blocks, text, fill, block_size, nL_id=nL_id)
-            return blocks, fill
-    tokens = tokenizer.encode(text)
-    fill = _tokenize_block_simply(blocks, tokens, fill, block_size, overlap=overlap)
-    return blocks, fill
-"""
-
 empty_tokens = []
 
 def _block_simply(blocks: List[List[int]], tokens: List[int], block_size=DEFAULT_BLOCK_SIZE, fill=empty_tokens):
@@ -242,7 +295,7 @@ def tokenize_file(tokenizer, filename, update_fn=None,
     if N:
         pbar.close()
     return blocks
-
+"""
 
 def stat_tokens(counts):
     if len(counts) == 0:
@@ -276,23 +329,26 @@ class DatasetStore(object):
         self.config['tokenizer_path'] = str(self.tokenizer.name_or_path)
         self.config['tokenizer'] = get_tokenizer_info(self.tokenizer)
         self.block_size = self.config.get("block_size", DEFAULT_BLOCK_SIZE)
+        self.split_prefix = safe_splitprefix(self.config.get('split', DEFAULT_SPLIT))
         self.file_ext = self.config.get("file_ext", "npz")
         self.n_chunks = self.config.get("n_chunks", N_CHUNKS)
-        self.split_prefix = safe_splitprefix(self.config.get('split', DEFAULT_SPLIT))
         self.shuffle = self.config.get("shuffle", False)
         self.chunkseq = 0
         self.bufs = []
         self.n_items = 0
         self.token_counts = []
+        self.chunk_files = []
 
     def save_config(self):
-        config_file = f"{self.dir}/{self.split_prefix}config.json"
+        config_file = safe_join(self.dir, f'{self.split_prefix}config.json')
         with open(config_file, "w") as w:
             json.dump(self.config, w)
     
     def save(self, save_config=True):
         if len(self.bufs) > 0:
-            save_chunk(self.dir, self.chunkseq, self.split_prefix, self.file_ext, self.bufs)
+            chunk_file = chunkseq_to_filename(self.chunkseq, self.split_prefix, self.file_ext)
+            save_chunk_file(self.dir, chunk_file, self.bufs)
+            self.chunk_files.append(chunk_file)
             self.n_items += len(self.bufs)
             if len(self.bufs) == self.n_chunks:
                 self.chunkseq += 1
@@ -305,8 +361,11 @@ class DatasetStore(object):
                 n_chunks=self.n_chunks,
                 chunkseq=self.chunkseq,
                 tokens=stat_tokens(self.token_counts)
-            ))
+            ))            
             self.n_tokens = self.config['n_tokens'] = self.config['tokens']['total'] # 正確な値
+            file_checks = make_chunk_filelist(self.dir, self.chunk_files)
+            if file_checks:
+                self.config['filechecks'] = file_checks
             self.save_config()
 
     def append(self, block: List[int]):
@@ -320,79 +379,15 @@ class DatasetStore(object):
             self.append(block)    
 
     def upload(self, filename, padding=False, overlap=0, N=None, jsonl_key='text', sep=DEFAULT_SEP):
-        tokenize_file(self.tokenizer, filename=filename, N=N, jsonl_key=jsonl_key, 
-            update_fn=self.extend, 
-            block_size=self.block_size, padding=padding, overlap=overlap, sep=sep
-        )
+        splitter = TextBlockSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
+        splitter.split_file(filename, update_fn=self.extend, N=N)
+        splitter.report()
+        # tokenize_file(self.tokenizer, filename=filename, N=N, jsonl_key=jsonl_key, 
+        #     update_fn=self.extend, 
+        #     block_size=self.block_size, padding=padding, overlap=overlap, sep=sep
+        # )
         self.save()
         verbose_print(f'Tokens: {self.n_tokens:,} Items: {self.n_items:,} Blocks: {self.block_size:,}')
-
-
-from pathlib import Path
-import time
-
-def get_file_size(file_path):
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        return os.path.getsize(file_path)
-    else:
-        return -1
-
-def touch(file_path):
-    file = Path(file_path)
-    file.touch(exist_ok=True)
-
-def wait_for_file(file_path, timeout=60):
-    """
-    指定されたファイルが存在するかを定期的にチェックし、
-    タイムアウトまでにファイルが見つかった場合は True を返します。
-    タイムアウトした場合は False を返します。
-    """
-    start_time = time.time()
-    end_time = start_time + timeout
-    while time.time() < end_time:
-        if get_file_size(file_path) > 0:
-            verbose_print(f'{time.time()-start_time} 秒, 待ちました')
-            return True  # ファイルが見つかった
-        time.sleep(1)  # 1秒待つ
-    return False  # タイムアウト
-
-def resolve_file(url_base, file_path, cache_dir, sync=True):
-    remote_file = safe_join(url_base, file_path)
-    if remote_file.startswith('/'):
-        # ローカルなファイルパスの場合
-        return remote_file
-    cache_file = safe_join(cache_dir, file_path)
-    # ディレクトリを作っておく
-    os.makedirs(cache_file.rpartition("/")[0], exist_ok=True)
-    cache_file_size = get_file_size(cache_file)
-    #print('@', cache_file_size, cache_file)
-    if cache_file_size > 0:
-        return cache_file
-
-    # ダウンロードコマンド
-    if remote_file.startswith('file:'):
-        remote_file = os.path.abspath(remote_file[5:]) # file: をとる
-        cmd = f'cp {remote_file} {cache_file}'
-    else:
-        cmd = f"wget -qO {cache_file}.tmp {remote_file} && mv {cache_file}.tmp {cache_file}"
-
-    if sync:
-        if cache_file_size == 0:
-            verbose_print('ダウンロード中 最大30秒待ちます.', remote_file)
-            if wait_for_file(cache_file, 30):
-                return cache_file
-        touch(cache_file)
-        subprocess.call(cmd, shell=True)
-        verbose_print(f'Downloaded {get_file_size(cache_file):,} bytes:', cmd)
-        return cache_file
-
-    if get_file_size(cache_file) == -1:
-        touch(cache_file)
-        verbose_print('プレフェッチ', remote_file)
-        subprocess.call(f"{cmd} &", shell=True, stderr=subprocess.DEVNULL)
-    # else:
-    #     verbose_print('既にダウンロード中..', remote_file)
-    return None
 
 
 # ChunkedDataset
@@ -415,13 +410,13 @@ def url_to_hash(url):
     return hashlib.md5(url.encode()).hexdigest()
 
 class ChunkedDataset(Dataset):
-    def __init__(self, url, split=DEFAULT_SPLIT, block_size=None, lock_file=None, cache_dir=".", prefetch=1, **kwargs):
+    def __init__(self, url, split=DEFAULT_SPLIT, block_size=None, lock_file=None, cache_dir=".", shuffle=True, prefetch=1, **kwargs):
         """
         block_size=Noneのときは、再分割しない
         """
         self.url = safe_dir(url)
         self.split_prefix = safe_splitprefix(split)
-        self.cache_dir = f'{safe_dir(cache_dir)}/{url_to_hash(url)}'
+        self.cache_dir = join_path(cache_dir, url_to_hash(url))
         self.lock_file = lock_file
         self.config = self.load_config(kwargs)
         self.file_ext = self.config.get("file_ext", "npz")
@@ -429,11 +424,12 @@ class ChunkedDataset(Dataset):
         self.n_items = self.config.get("n_items", 0)
         self.n_chunks = self.config.get("n_chunks", N_CHUNKS)
         if block_size is None or block_size >= self.config.get('block_size', -1):
-            self.block_split = 1  # 再分割しない
+            self.n_subblocks = 1  # 再分割しない
         else:
             self.block_size = block_size
-            self.block_split = self.config['block_size'] // block_size
-        #print('DEBUG: block_split', self.block_split, block_size, self.config.get('block_size', -1))
+            self.n_subblocks = self.config['block_size'] // block_size
+        #print('DEBUG: n_subblocks', self.n_subblocks, block_size, self.config.get('block_size', -1))
+        self.shuffle = shuffle
         self.queue = deque(maxlen=64)
         self.cache = {}
         self.prefetch=prefetch
@@ -448,51 +444,48 @@ class ChunkedDataset(Dataset):
             with open(config_file) as f:
                 config = json.load(f)
         except BaseException as e:
-            verbose_print(f'読み込みに失敗しました {self.url} ({config_file})')
+            verbose_print(f'見つかりません {self.url} ({config_file})')
             config = dict(n_items=0, n_tokens=0)
         config.update(kwargs)
         return config
     
     def __len__(self):
-        return self.n_items * self.block_split
+        return self.n_items * self.n_subblocks
 
-    def get_chunks(self, filepath):
-        if filepath in self.cache:
-            return self.cache[filepath]
-        try:
-            with _FileLock(self.lock_file):
-                filepath2 = resolve_file(self.url, filepath, self.cache_dir)
-                chunks = load_chunk_npz(filepath2)
-                random.shuffle(chunks)
-        except BaseException as e:
-            verbose_print(f'{filepath2} has an error: {e}')
-            if len(self.queue) == 0:
-                raise e
-            # エラーで落ちくらいなら、キャッシュのデータで学習を続ける
+    def try_prefetch(self, chunkseq):
+        chunk_file = chunkseq_to_filename(chunkseq % self.max_chunkseq, self.split_prefix, self.file_ext)
+        resolve_file(self.url, chunk_file, self.cache_dir, sync=False)
+
+    def get_chunks(self, chunk_file):
+        if chunk_file in self.cache:
+            return self.cache[chunk_file]
+        with _FileLock(self.lock_file):
+            chunk_file2 = resolve_file(self.url, chunk_file, self.cache_dir)
+            chunks = load_chunk_file(chunk_file2)
+        if chunks is None:
+            # エラーで落ちるくらいなら、キャッシュのデータで学習を続ける
             chunks = self.cache[self.queue[0]]
+        if self.shuffle:
+            random.shuffle(chunks)
         if len(self.queue) == 64:
             older = self.queue.popleft()
             if older in self.cache:
                 del self.cache[older]
-        self.queue.append(filepath)
-        self.cache[filepath] = chunks
+        self.queue.append(chunk_file)
+        self.cache[chunk_file] = chunks
         return chunks
 
-    def try_prefetch(self, chunkseq):
-        filepath = chunkseq_to_filepath(chunkseq % self.max_chunkseq, self.split_prefix, 'npz')
-        resolve_file(self.url, filepath, self.cache_dir, sync=False)
-
     def __getitem__(self, index):
-        offset = index % self.block_split
-        i = index // self.block_split
+        offset = index % self.n_subblocks
+        i = index // self.n_subblocks
         chunkseq = i // self.n_chunks
-        filepath = chunkseq_to_filepath(chunkseq, self.split_prefix, 'npz')
-        chunks = self.get_chunks(filepath)
+        chunk_file = chunkseq_to_filename(chunkseq, self.split_prefix, self.file_ext)
+        chunks = self.get_chunks(chunk_file)
         if self.prefetch > 0 and index % self.n_chunks == 0:
             self.try_prefetch(chunkseq+self.prefetch)
         chunk = chunks[i % self.n_chunks]
-        if self.block_split > 1:
-            return chunk[offset*self.block_size:(offset+1)*self.block_size]
+        if self.n_subblocks > 1:
+            return chunk[offset * self.block_size : (offset+1) * self.block_size]
         return chunk
 
     def compact(self, start, end):
@@ -509,9 +502,12 @@ class FileDataset(Dataset):
         if isinstance(tokenizer, str):
             tokenizer = load_tokenizer(tokenizer)
         start = time.time()
-        blocks = tokenize_file(tokenizer, filename=filename, N=-1, jsonl_key='text',
-            block_size=max_length, padding=padding, overlap=0, sep=DEFAULT_SEP
-        )
+        splitter = TextBlockSplitter(tokenizer=tokenizer, block_size=max_length)
+        blocks = splitter.split_file(filename, N=-1)
+        #splitter.report()
+        # blocks = tokenize_file(tokenizer, filename=filename, N=-1, jsonl_key='text',
+        #     block_size=max_length, padding=padding, overlap=0, sep=DEFAULT_SEP
+        # )
         self.chunks = []
         token_counts = []
         for b in blocks:
