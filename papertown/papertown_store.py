@@ -28,7 +28,7 @@ def main_store():
     store = DatasetStore(tokenizer=tokenizer, 
                          block_size=hparams.block_size, 
                          dir=hparams.store_path)
-    store.upload(filename=hparams.files[0], format=hparams, split=hparams.split, N=hparams.N)
+    store.upload(filename=hparams.files[0], format=hparams.format, split=hparams.split, N=hparams.N)
 
 
 
