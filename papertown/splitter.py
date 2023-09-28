@@ -1,5 +1,7 @@
 from typing import List
-import random 
+import random
+import json
+import numpy as np
 import pandas as pd
 
 from .papertown_tokenizer import find_ellipsis_token_id
@@ -8,7 +10,63 @@ from .papertown_utils import zopen, get_file_lines
 DEFAULT_BLOCK_SIZE=1024
 empty_tokens = []
 
+def stat_tokens(counts):
+    if len(counts) == 0:
+        return {'total': 0}
+    data = np.array(counts)
+    return {
+        'total': int(np.sum(data)),
+        'mean': float(np.mean(data)),
+        'std': float(np.var(data)) ** 0.5,
+        'max': int(np.max(data)),
+        '75%': int(np.percentile(data, 75)),
+        'median': int(np.median(data)),
+        '25%': int(np.percentile(data, 25)),
+        'min': int(np.min(data)),
+    }
+
+def parse_strip(s, sep):
+    return s.strip()
+
+def parse_jsonl(line, sep):
+    d = json.loads(line)
+    if 'out' in d:
+        return f"{d['in']}{sep}{d['out']}"
+    return d['text']
+
+def file_iterator(filename, N=None, sep='<seP>'):
+    if N == -1:
+        N = get_file_lines(filename)-1
+    if N:
+        from tqdm import tqdm
+        pbar = tqdm(total=N, desc=filename)
+    parse_fn = parse_strip
+    if '.json' in filename:
+        parse_fn = parse_jsonl
+    c=0
+    with zopen(filename) as f:
+        line = f.readline()
+        while line is not None:
+            c+=1
+            if N: 
+                pbar.update()
+                if c > N: break
+            yield parse_fn(line, sep)
+            line = f.readline()
+    if N:
+        pbar.close()
+
+
 class DefaultSplitter(object):
+    def __init__(self, tokenizer, block_size, sep=None):
+        self.tokenizer = tokenizer
+        self.pad_token_id = tokenizer.pad_token_id
+        self.eos_token_id = tokenizer.eos_token_id
+        self.ellipsis_token_id = find_ellipsis_token_id(tokenizer)
+        self.block_size = block_size
+        self.sep = sep
+        self.token_counts = []
+        self.pad_count = 0
 
     def split(self, text:str, blocks: List[List[int]]):
         raise NotImplemented()
@@ -16,56 +74,47 @@ class DefaultSplitter(object):
     def flush(self, blocks: List[List[int]]):
         pass
 
-    def split_file(self, filename, update_fn=None, N=None): 
-        if N == -1:
-            N = get_file_lines(filename)
-        if N:
-            from tqdm import tqdm
-            pbar = tqdm(total=N, desc=filename)
-        blocks=[]
-        with zopen(filename) as f:
-            line = f.readline()
-            c=1
-            while line:
-                self.split(line, blocks)
-                if update_fn is not None:
-                    update_fn(blocks)
-                    blocks=[]
-                line = f.readline()
-                if N: 
-                    pbar.update()
-                    if c > N: break
-                c+=1
-        self.flush(blocks)
-        if update_fn is not None:
-            update_fn(blocks)
-            blocks=[]
-        if N:
-            pbar.close()
-        return blocks
+    def split_iter(self, iterator, update_fn=None):
+        blocks = []
+        if update_fn:
+            for text in iterator:
+                self.split(text, blocks)
+                update_fn(blocks)
+                blocks=[]
+            self.flush(blocks)
+        else:
+            for text in iterator:
+                self.split(text, blocks)
+            self.flush(blocks)
+            return blocks
+
+    def report(self, logs: dict = None, verbose=True):
+        token_count = sum(self.token_counts)
+        if logs:
+            logs['n_tokens'] = token_count
+            logs['tokens'] = stat_tokens(self.token_counts)
+        if verbose:
+            print(pd.DataFrame({'tokens': self.token_counts}).describe())
+        if self.pad_count > 0:
+            if verbose:
+                print(f'pad: {self.pad_count:,} {self.pad_count*100/token_count:.2f}%')
+            if logs:
+                logs['padding_rate'] = self.pad_count / token_count
+        # if len(self.sep_counts) > 0:
+        #     print(pd.DataFrame({'separators': self.sep_counts}).describe())
 
 
-class TextBlockSplitter(DefaultSplitter):
-    def __init__(self, tokenizer, block_size, work_size=512, pad_size=64, sep=None):
-        """
-        pad_size: 空白埋めする最大のサイズ
-        """
-        self.tokenizer = tokenizer
-        self.pad_token_id = tokenizer.pad_token_id
-        self.eos_token_id = tokenizer.eos_token_id
-        self.ellipsis_token_id = find_ellipsis_token_id(tokenizer)
-        self.block_size = block_size
+class PretrainedTextSplitter(DefaultSplitter):
+    def __init__(self, tokenizer, block_size, sep=None, work_size=512, pad_size=64):
+        super().__init__(tokenizer, block_size, sep=sep)
         self.work_size = work_size
+        self.trancate_size=0
+        self.pad_size = pad_size
+        self.extra_tokens = empty_tokens
         self.work_buffers = []
         self.lazy_buffers = []
-        self.pad_size = pad_size
         self.heads = [[] for _ in range(self.work_size//self.pad_size)]
-        self.trancate_size=0
-        self.sep = sep
-        self.extra_tokens = empty_tokens
-        self.pad_count = 0
         self.match_count = 0
-        self.token_counts = []
         self.sep_counts = []
 
     def resize_as_dividable(self, tokens, size, trancate_size=0, padding_size=None):
@@ -95,7 +144,9 @@ class TextBlockSplitter(DefaultSplitter):
         tokenizer = self.tokenizer
         chunks = [tokenizer.convert_tokens_to_ids(tokenizer.tokenize(line)) for line in text_blocks]
         chunks[-1] = tokenizer.build_inputs_with_special_tokens(chunks[-1])
-        self.sep_counts.extend(len(c) for c in chunks)
+        counts = [len(c) for c in chunks]
+        self.token_counts.append(sum(counts))
+        self.sep_counts.extend(counts)
         tokens = []
         chunk_bufs = []
         split_size = self.pad_size * 2
@@ -108,8 +159,7 @@ class TextBlockSplitter(DefaultSplitter):
                 tokens.extend(chunk_bufs)
                 chunk_bufs=[]
             else:
-                splitted = self.resize_as_dividable(chunk_bufs, self.pad_size, 
-                                                    padding_size=0, trancate_size=self.pad_size)
+                splitted = self.resize_as_dividable(chunk_bufs, self.pad_size, trancate_size=self.pad_size, padding_size=0)
                 tokens.extend(splitted)
                 if prev_len > 0:
                     chunk_bufs = chunk
@@ -187,94 +237,72 @@ class TextBlockSplitter(DefaultSplitter):
             segmented = tokens[i : i + work_size]
             self.add_buffer(blocks, segmented)
 
-    def report(self):
-        token_count = sum(self.token_counts)
-        print(f'pad: {self.pad_count:,} {self.pad_count*100/token_count:.2f}%')
-        print(f'match: {self.match_count:,} {len(self.heads)}')
-        print(pd.DataFrame({'tokens': self.token_counts}).describe())
-        # heads = [len(h) for hh in self.heads]
-        # print(pd.DataFrame({'heads': heads}).describe())
-        if len(self.sep_counts) > 0:
-            print(pd.DataFrame({'separators': self.sep_counts}).describe())
+class TextSplitter(DefaultSplitter):
+    def __init__(self, tokenizer, block_size, sep=None):
+        super().__init__(tokenizer, block_size, sep=sep)
 
+    def tokenize_pair(self, text:str, text_pair: str, blocks: List[List[int]]):
+        inputs = self.tokenizer.convert_tokens_to_ids(self.tokenizer.tokenize(text))
+        labels = self.tokenizer.encode(text_pair)
+        if len(labels) > self.block_size:
+            # ラベルの方が大きい場合は諦める
+            return
+        if len(inputs)+len(labels) > self.block_size:
+            half_size = (self.block_size - len(labels)) // 2
+            prefix = inputs[:half_size]
+            suffix = inputs[-half_size:]
+            if self.ellipsis_token_id:
+                prefix[-1] = self.ellipsis_token_id
+            inputs = prefix + suffix
+        blocks.append(inputs+labels)
+        self.token_counts.append(len(inputs+labels))
 
+    def tokenize_text(self, text:str, blocks: List[List[int]]):
+        inputs = self.tokenizer.encode(text)
+        if len(inputs) > self.block_size:
+            half_size = self.block_size // 2
+            prefix = inputs[:half_size]
+            suffix = inputs[-half_size:]
+            if self.ellipsis_token_id:
+                prefix[-1] = self.ellipsis_token_id
+            inputs = prefix + suffix
+        blocks.append(inputs)
+        self.token_counts.append(len(inputs))
 
-"""
-def _block_simply(blocks: List[List[int]], tokens: List[int], block_size=DEFAULT_BLOCK_SIZE, fill=empty_tokens):
-    # とりあえず、シンプルにブロックを分割する
-    for i in range(0, len(tokens) - block_size + 1, block_size):  
-        segmented = tokens[i : i + block_size]
-        blocks.append(segmented)
-    remaining = len(tokens) % block_size
-    if remaining == 0: # 最後の分割が揃っていればおしまい
-        return fill
-    remaining_tokens = tokens[-remaining:] + fill
-    while len(remaining_tokens) >= block_size:
-        blocks.append(remaining_tokens[:block_size])
-        remaining_tokens = remaining_tokens[block_size:]
-    return remaining_tokens
+    def split(self, text:str, blocks: List[List[int]]):
+        if self.sep is not None:
+            t = text.split(self.sep)
+            if len(t) == 2:
+                self.tokenize_pair(t[0], t[1], blocks)
+                return
+            text = ''.join(t) # sep を取り除く
+        self.tokenize_text(text, blocks)
 
-def tokenize_block_sep(tokenizer, blocks: List[List[int]], text:str, 
-                       block_size=DEFAULT_BLOCK_SIZE, 
-                       fill=empty_tokens, sep=DEFAULT_SEP, overlap=0):
-    chunks = [tokenizer.convert_tokens_to_ids(tokenizer.tokenize(line)) for line in text.split(sep)]
-    chunks[-1] = tokenizer.build_inputs_with_special_tokens(chunks[-1])
-    chunk = []
-    for ids in chunks:
-        prev_length = len(chunk)
-        chunk.extend(ids)
-        if len(chunk) >= block_size:
-            blocks.append(chunk[:block_size])
-            if block_size - prev_length < overlap:
-                chunk = _block_simply(blocks, ids, block_size)
-            else:
-                chunk = _block_simply(blocks, chunk[block_size:], block_size)
-    if len(chunk) > 4:
-        return _block_simply(blocks, chunk, block_size, fill)
-    return fill
+class TextPairSplitter(DefaultSplitter):
+    def __init__(self, tokenizer, block_size, sep=None):
+        super().__init__(tokenizer, block_size, sep=sep)
 
-def tokenize_text(tokenizer, blocks, text, block_size=DEFAULT_BLOCK_SIZE):
-    inputs = tokenizer.encode(text)
-    if len(inputs) > block_size:
-        half_size = block_size // 2
-        prefix = inputs[:half_size]
-        suffix = inputs[-half_size:]
-        prefix[-1] = find_ellipsis_token_id(tokenizer)
-        inputs = prefix + suffix
-    blocks.append(inputs)
-    return empty_tokens
+    def tokenize_pair(self, text:str, text_pair: str, blocks: List[List[int]]):
+        inputs = self.tokenizer.encode(text)
+        labels = self.tokenizer.encode(text_pair)
+        if len(labels) > self.block_size:
+            # ラベルの方が大きい場合は諦める
+            return
+        if len(inputs)+len(labels) > self.block_size:
+            # ラベルは完全に残す
+            half_size = (self.block_size - len(labels)) // 2
+            prefix = inputs[:half_size]
+            suffix = inputs[-half_size:]
+            if self.ellipsis_token_id:
+                prefix[-1] = self.ellipsis_token_id
+            inputs = prefix + suffix
+        blocks.append(inputs+labels)
+        self.token_counts.append(len(inputs+labels))
 
-def tokenize_pair(tokenizer, blocks, inputs, labels, block_size=DEFAULT_BLOCK_SIZE):
-    inputs = tokenizer.encode(inputs)
-    labels = tokenizer.encode(labels)
-    if len(labels) > block_size:
-        # ラベルの方が大きい場合は諦める
-        return empty_tokens
-    if len(inputs)+len(labels) > block_size:
-        # ラベルは完全に残す
-        half_size = (block_size - len(labels)) // 2
-        prefix = inputs[:half_size]
-        suffix = inputs[-half_size:]
-        prefix[-1] = find_ellipsis_token_id(tokenizer)
-        inputs = prefix + suffix
-    blocks.append(inputs+labels)
-    return empty_tokens
-
-def tokenize_line(tokenizer, blocks, line:str, 
-                  block_size=DEFAULT_BLOCK_SIZE, fill=empty_tokens,
-                  padding=False, jsonl_key='text', sep=DEFAULT_SEP, overlap=0):
-    if jsonl_key is not None:
-        d = json.loads(line)
-        if 'out' in d and 'in' in d:
-            return tokenize_pair(tokenizer, blocks, d['in'], d['out'], block_size=block_size)
-        if 'inputs' in d and 'labels' in d:
-            return tokenize_pair(tokenizer, blocks, d['inputs'], d['labels'], block_size=block_size)
-        line = d[jsonl_key]
-    else:
-        line = line.rstrip()
-    if padding:
-        return tokenize_text(tokenizer, blocks, line, block_size=block_size)
-    else:
-        return tokenize_block_sep(tokenizer, blocks, line, block_size, fill, sep, overlap)
-"""
-
+    def split(self, text:str, blocks: List[List[int]]):
+        t = text.split(self.sep)
+        if len(t)==2:
+            self.tokenize_pair(t[0], t[1], blocks)
+        else:
+            raise ValueError(f'In text, the {self.sep} token is required.')
+    

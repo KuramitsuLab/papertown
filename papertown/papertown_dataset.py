@@ -20,7 +20,7 @@ from torch.utils.data import Dataset
 
 from .papertown_utils import *
 from .papertown_tokenizer import *
-from .splitter import TextBlockSplitter
+from .splitter import PretrainedTextSplitter, TextSplitter, TextPairSplitter, file_iterator
 
 _ID = 0
 def random_name():
@@ -355,17 +355,15 @@ class DatasetStore(object):
                 self.bufs = []
         if save_config:
             self.config.update(dict(
-                n_tokens=self.n_items * self.block_size, # 概算
                 block_size=self.block_size,
                 n_items=self.n_items,
                 n_chunks=self.n_chunks,
                 chunkseq=self.chunkseq,
-                tokens=stat_tokens(self.token_counts)
-            ))            
-            self.n_tokens = self.config['n_tokens'] = self.config['tokens']['total'] # 正確な値
+            ))
             file_checks = make_chunk_filelist(self.dir, self.chunk_files)
             if file_checks:
                 self.config['filechecks'] = file_checks
+            self.n_tokens = self.config['n_tokens'] # 正確な値
             self.save_config()
 
     def append(self, block: List[int]):
@@ -378,14 +376,21 @@ class DatasetStore(object):
         for block in blocks:
             self.append(block)    
 
-    def upload(self, filename, padding=False, overlap=0, N=None, jsonl_key='text', sep=DEFAULT_SEP):
-        splitter = TextBlockSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
-        splitter.split_file(filename, update_fn=self.extend, N=N)
-        splitter.report()
-        # tokenize_file(self.tokenizer, filename=filename, N=N, jsonl_key=jsonl_key, 
-        #     update_fn=self.extend, 
-        #     block_size=self.block_size, padding=padding, overlap=overlap, sep=sep
-        # )
+    def upload(self, filename, format='pre', split='train', N=None, sep=DEFAULT_SEP):
+        if format == 'pre':
+            splitter = PretrainedTextSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
+            split = 'pretrain'
+        elif format == 'seq2seq':
+            splitter = TextPairSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
+            split = f'seq2seq_{split}'
+        else:
+            splitter = TextSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
+            format = ''
+        self.split_prefix = safe_splitprefix(split)
+        iterator = file_iterator(filename, N=N, sep=sep)
+        splitter.split_iter(iterator=iterator, update_fn=self.extend)
+        splitter.report(self.config, verbose=True)
+        self.config['format'] = format
         self.save()
         verbose_print(f'Tokens: {self.n_tokens:,} Items: {self.n_items:,} Blocks: {self.block_size:,}')
 
