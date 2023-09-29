@@ -5,7 +5,7 @@ import re
 import hashlib
 
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, T5Tokenizer
 from .papertown_utils import *
 
 DEFAULT_NL = os.environ.get('PT_NK', '<nL>')
@@ -26,7 +26,7 @@ def find_sep_token_id(tokenizer: AutoTokenizer):
     return find_token_id(tokenizer, DEFAULT_SEP, "<seP>", "<sep>")
 
 def find_ellipsis_token_id(tokenizer: AutoTokenizer):
-    return find_token_id(tokenizer, DEFAULT_ELLIPSIS, "<ellipsis>", "<masK>", "<mask>", "<extra_id_99>")
+    return find_token_id(tokenizer, DEFAULT_ELLIPSIS, "<ellipsiS>", "<ellipsis>", "<masK>", "<mask>", "<extra_id_99>")
 
 _EXTRA_IDS = [f'<extra_id_{i}>' for i in range(100)]
 
@@ -189,3 +189,5 @@ def load_tokenizer(tokenizer_path=DEFAULT_TOKENIZER, adapt=True):
     if adapt:
         adapt_tokenizer(tokenizer)
     return tokenizer
+
+

@@ -40,3 +40,8 @@ def verbose_print(*args, **kwargs):
     """
     print('📃', *args, **kwargs)
 
+def verbose_error(*args, **kwargs):
+    """
+    PaperTownのエラープリント
+    """
+    print('💔', *args, **kwargs)

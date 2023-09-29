@@ -15,7 +15,7 @@ def setup_store():
     parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
     parser.add_argument("--store_path", default="store")
     parser.add_argument("--block_size", type=int, default=2048)
-    parser.add_argument("--format", default="pre")
+    parser.add_argument("--format", default="")
     parser.add_argument("--split", default=DEFAULT_SPLIT)
     parser.add_argument("--N", type=int, default=None)
     parser.add_argument("--num_works", type=int, default=0)
@@ -37,12 +37,16 @@ def setup_testdata():
     parser.add_argument("--url_list", type=str)
     parser.add_argument("--block_size", type=int, default=1024)
     parser.add_argument("--N", type=int, default=0)
+    parser.add_argument("--format", default="")
+    parser.add_argument("--split", default=DEFAULT_SPLIT)
     hparams = parser.parse_args()  # hparams になる
     return hparams
 
 def main_testdata():
     hparams = setup_testdata()
-    with DataComposer(url_list=hparams.url_list, block_size=hparams.block_size) as dc:
+    with DataComposer(url_list=hparams.url_list, 
+                      split=hparams.format+hparams.split,
+                      block_size=hparams.block_size) as dc:
         print(len(dc))
         if hparams.N == 0:
             return
@@ -55,7 +59,32 @@ def main_testdata():
         print(f'Total: {end-start:.1f}s Iterations: {hparams.N:,} {hparams.N/(end-start)}[it/s]')
 
 
+"""
+def setup_dump():
+    parser = argparse.ArgumentParser(description="papertown_dump")
+    parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
+    parser.add_argument("--url_list", type=str)
+    parser.add_argument("--block_size", type=int, default=1024)
+    parser.add_argument("--N", type=int, default=0)
+    parser.add_argument("--format", default="")
+    parser.add_argument("--split", default=DEFAULT_SPLIT)
+    hparams = parser.parse_args()  # hparams になる
+    return hparams
+
+
+def main_dump():
+    parser.add_argument("files", type=str, nargs="+", help="files")
+    parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
+    tokenizer = load_tokenizer('')
+    with DataComposer(url_list=urls, block_size=256) as dc:
+        print('len(dc):', len(dc))
+        for i in range(len(dc)):
+                x = tokenizer.decode(dc[i])
+                if i%100==0:
+                    print(i, dc[i], x)
+"""
+
 
 if __name__ == "__main__":  # わかります
-    main_download()
+    main_testdata()
 

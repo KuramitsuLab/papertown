@@ -428,6 +428,7 @@ class ChunkedDataset(Dataset):
         self.n_tokens = self.config.get('n_tokens', 0)
         self.n_items = self.config.get("n_items", 0)
         self.n_chunks = self.config.get("n_chunks", N_CHUNKS)
+        self.tokenizer_path = self.config.get("tokenizer_path", DEFAULT_TOKENIZER)
         if block_size is None or block_size >= self.config.get('block_size', -1):
             self.n_subblocks = 1  # 再分割しない
         else:
@@ -540,8 +541,8 @@ class FileDataset(Dataset):
 def _parse_split(url, split):
     start, end = '', ''
     if '[' in url and url.endswith(']'):
-        url, _, split = url.rpartition('[')
-        start, end = split[:-1].split(':')
+        url, _, range = url.rpartition('[')
+        start, end = range[:-1].split(':')
     if '?' in url:
         url, _, split = url.rpartition('?')
         if split.startswith('split='):
@@ -620,7 +621,7 @@ def parse_url_list(url_list=[]):
     return url_list
 
 class DataComposer(Dataset):
-    def __init__(self, url_list, split = DEFAULT_SPLIT, 
+    def __init__(self, url_list, format="pre", split = DEFAULT_SPLIT, 
                  max_length=DEFAULT_MAX_LENGTH, block_size=None,
                  build_fn=build_inputs_for_clm, tokenizer=None, shuffle=True,
                  cache_dir = DEFAULT_CACHE_DIR, use_filelock=True, prefetch=1):
@@ -630,7 +631,7 @@ class DataComposer(Dataset):
         else:
             self.max_length = min(max_length, block_size)
             self.padding=False
-        self.split = split
+        self.split = format + split
         self.cache_dir = f'{safe_dir(cache_dir)}/{random_name()}'
         os.makedirs(self.cache_dir, exist_ok=True)
         self.lock_file = f'{self.cache_dir}/lock' if use_filelock else None
@@ -641,6 +642,7 @@ class DataComposer(Dataset):
     def _prepare_datasets(self, urls, tokenizer, block_size):
         self.n_items = 0
         self.n_tokens = 0
+        tokenizer_path = None
         datasets = []
         for i, url in enumerate(urls):
             url, split, start, end = _parse_split(url, self.split)
@@ -653,8 +655,17 @@ class DataComposer(Dataset):
                 dataset = ChunkedDataset(url, split=split, block_size=block_size, 
                                          lock_file=self.lock_file, prefetch=self.prefetch,
                                          cache_dir=self.cache_dir)
+                if tokenizer_path is None:
+                    tokenizer_path = dataset.tokenizer_path
+                else:
+                    if tokenizer_path != dataset.tokenizer_path:
+                        verbose_error(f'トークンナイザーが一致しません。{tokenizer_path}')
+                        verbose_error(f'    {dataset.tokenizer_path} @{url}')
+                        verbose_print(f'** {url} は、無視して学習を続けます。')
+                        continue
+
             if len(dataset) == 0:
-                verbose_print(f'{url} は、無視して学習を続けます。')
+                verbose_print(f'** {url} は、無視して学習を続けます。')
                 continue
             start, end = _parse_range(start, end, len(dataset))
             start, end = dataset.compact(start, end)
@@ -682,7 +693,6 @@ class DataComposer(Dataset):
         mix = len(self.mixer)
         item = self.mixer[idx % mix][idx]
         return self.build_fn(item, self.max_length)
-
 
 ## Seq2Seq
 
@@ -716,6 +726,16 @@ class MSP(object):
             "input_ids": torch.tensor(inputs[max_length//2], dtype=torch.long),
             "labels": torch.tensor(outputs[max_length//2], dtype=torch.long),
         }
+
+class T5PretrainComposer(DataComposer):
+    def __init__(self, url_list, split="train", **kwargs):
+        DataComposer.__init__(self, url_list, format="pre", split=split, **kwargs)
+
+
+class T5FinetuneComposer(DataComposer):
+    def __init__(self, url_list, split="train", **kwargs):
+        DataComposer.__init__(self, url_list, format="seq2seq", split=split, **kwargs)
+
 
 class DP(object):
     def __init__(self, tokenizer, lambda_=20):
