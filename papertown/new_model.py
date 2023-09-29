@@ -91,7 +91,10 @@ def print_summary(result, use_flash=False):
     print(f"Time: {m['train_runtime']:.2f}", end=' ')
     print(f"Samples/second: {m['train_samples_per_second']:.2f} FlashAttn={use_flash}")
     print(f"Global step: {result.global_step} batch_size: {1024//result.global_step}", end=' ')
-    print(f"FLOS: {m['total_flos']} {format_large_number(m['total_flos'])} Loss: {m['train_loss']:.5f}")
+    if 'total_flos' in m:
+        print(f"FLOS: {m['total_flos']} {format_large_number(m['total_flos'])} Loss: {m['train_loss']:.5f}")
+    else:
+        print(f"Loss: {m['train_loss']:.5f}")
     print_gpu_utilization()
 
 
