@@ -354,5 +354,5 @@ def new_TextSplitter(tokenizer, format='simple', block_size=1024, padding=True, 
     elif format == 'seq2seq':
         if not padding:
             verbose_print("format='seq2seq'では、padding=Falseは無効です。")
-        splitter = TextPairSplitter(tokenizer, block_size=block_size, sep=sep)
+        splitter = TextPairSplitter(tokenizer, block_size=block_size, sep=DEFAULT_SEQ2SEQ_SEP)
     return splitter
