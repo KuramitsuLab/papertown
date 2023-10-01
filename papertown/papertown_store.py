@@ -28,7 +28,7 @@ def main_store():
     hparams = setup_store()
     tokenizer = load_tokenizer(hparams.tokenizer_path)
     if hparams.store_path is None:
-        _, _, token = hparams.tokenizer_path.rpartintion('/')
+        _, _, token = hparams.tokenizer_path.rpartition('/')
         file = hparams.files[0]
         if '/' in file:
             _, _, file = file.rpartition('/')
