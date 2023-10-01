@@ -41,7 +41,7 @@ def main_store():
                          dir=hparams.store_path)
     store.upload(filename=hparams.files[0], 
                  format=hparams.format, split=hparams.split, padding=hparams.padding, sep=hparams.sep, N=hparams.N)
-
+    print(store.config)
 
 
 def setup_testdata():
