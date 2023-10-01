@@ -4,10 +4,12 @@ import json
 import numpy as np
 import pandas as pd
 
-from .papertown_tokenizer import find_ellipsis_token_id
-from .papertown_utils import zopen, get_file_lines
+from .papertown_tokenizer import find_ellipsis_token_id, find_newline_token_id
+from .papertown_utils import zopen, get_file_lines, verbose_print
 
 DEFAULT_BLOCK_SIZE=1024
+DEFAULT_SEQ2SEQ_SEP='<outpuT>'
+
 empty_tokens = []
 
 def stat_tokens(counts):
@@ -25,16 +27,16 @@ def stat_tokens(counts):
         'min': int(np.min(data)),
     }
 
-def parse_strip(s, sep):
-    return s.strip()
+def parse_strip(s):
+    return s.strip().replace('<nL>', '\n')
 
-def parse_jsonl(line, sep):
+def parse_jsonl(line):
     d = json.loads(line)
     if 'out' in d:
-        return f"{d['in']}{sep}{d['out']}"
+        return f"{d['in']}{DEFAULT_SEQ2SEQ_SEP}{d['out']}"
     return d['text']
 
-def file_iterator(filename, N=None, sep='<seP>'):
+def file_iterator(filename, N=None):
     if N == -1:
         N = get_file_lines(filename)-1
     if N:
@@ -51,7 +53,7 @@ def file_iterator(filename, N=None, sep='<seP>'):
             if N: 
                 pbar.update()
                 if c > N: break
-            yield parse_fn(line, sep)
+            yield parse_fn(line)
             line = f.readline()
     if N:
         pbar.close()
@@ -64,7 +66,7 @@ class DefaultSplitter(object):
         self.eos_token_id = tokenizer.eos_token_id
         self.ellipsis_token_id = find_ellipsis_token_id(tokenizer)
         self.block_size = block_size
-        self.sep = sep
+        self.sep = sep if sep != '' else None
         self.token_counts = []
         self.pad_count = 0
 
@@ -82,6 +84,7 @@ class DefaultSplitter(object):
                 update_fn(blocks)
                 blocks=[]
             self.flush(blocks)
+            update_fn(blocks)
         else:
             for text in iterator:
                 self.split(text, blocks)
@@ -100,16 +103,41 @@ class DefaultSplitter(object):
                 print(f'pad: {self.pad_count:,} {self.pad_count*100/token_count:.2f}%')
             if logs:
                 logs['padding_rate'] = self.pad_count / token_count
-        # if len(self.sep_counts) > 0:
-        #     print(pd.DataFrame({'separators': self.sep_counts}).describe())
 
 
-class PretrainedTextSplitter(DefaultSplitter):
+class SimpleTextBlockSplitter(DefaultSplitter):
+    def __init__(self, tokenizer, block_size, sep=None):
+        super().__init__(tokenizer, block_size, sep=sep)
+        self.extra_tokens=empty_tokens
+        self.split_prefix='pre'
+
+    def tokenize_text(self, text:str, blocks: List[List[int]]):
+        tokens = self.tokenizer.encode(text)
+        work_size = self.block_size
+        tokens = self.extra_tokens + tokens
+        for i in range(0, len(tokens) - work_size + 1, work_size):  
+            segmented = tokens[i : i + work_size]
+            blocks.append(segmented)
+            self.token_counts.append(len(segmented))
+        extra_size = len(tokens) % work_size
+        if extra_size == 0:
+            self.extra_tokens = empty_tokens
+        else:
+            self.extra_tokens = tokens[-extra_size:]
+
+    def split(self, text:str, blocks: List[List[int]]):
+        self.tokenize_text(text, blocks)
+
+
+class MultiTextBlockSplitter(DefaultSplitter):
     def __init__(self, tokenizer, block_size, sep=None, work_size=512, pad_size=64):
         super().__init__(tokenizer, block_size, sep=sep)
+        self.split_prefix='pre'
         self.work_size = work_size
         self.trancate_size=0
         self.pad_size = pad_size
+        # 警告が出る場合があるので、padding を変更する
+        self.pad_token_id = find_newline_token_id(tokenizer)
         self.extra_tokens = empty_tokens
         self.work_buffers = []
         self.lazy_buffers = []
@@ -237,27 +265,27 @@ class PretrainedTextSplitter(DefaultSplitter):
             segmented = tokens[i : i + work_size]
             self.add_buffer(blocks, segmented)
 
-class TextSplitter(DefaultSplitter):
+class SimpleTextSplitter(DefaultSplitter):
     def __init__(self, tokenizer, block_size, sep=None):
         super().__init__(tokenizer, block_size, sep=sep)
 
-    def tokenize_pair(self, text:str, text_pair: str, blocks: List[List[int]]):
-        inputs = self.tokenizer.convert_tokens_to_ids(self.tokenizer.tokenize(text))
-        labels = self.tokenizer.encode(text_pair)
-        if len(labels) > self.block_size:
-            # ラベルの方が大きい場合は諦める
-            return
-        if len(inputs)+len(labels) > self.block_size:
-            half_size = (self.block_size - len(labels)) // 2
-            prefix = inputs[:half_size]
-            suffix = inputs[-half_size:]
-            if self.ellipsis_token_id:
-                prefix[-1] = self.ellipsis_token_id
-            inputs = prefix + suffix
-        blocks.append(inputs+labels)
-        self.token_counts.append(len(inputs+labels))
+    # def tokenize_pair(self, text:str, text_pair: str, blocks: List[List[int]]):
+    #     inputs = self.tokenizer.convert_tokens_to_ids(self.tokenizer.tokenize(text))
+    #     labels = self.tokenizer.encode(text_pair)
+    #     if len(labels) > self.block_size:
+    #         # ラベルの方が大きい場合は諦める
+    #         return
+    #     if len(inputs)+len(labels) > self.block_size:
+    #         half_size = (self.block_size - len(labels)) // 2
+    #         prefix = inputs[:half_size]
+    #         suffix = inputs[-half_size:]
+    #         if self.ellipsis_token_id:
+    #             prefix[-1] = self.ellipsis_token_id
+    #         inputs = prefix + suffix
+    #     blocks.append(inputs+labels)
+    #     self.token_counts.append(len(inputs+labels))
 
-    def tokenize_text(self, text:str, blocks: List[List[int]]):
+    def split(self, text:str, blocks: List[List[int]]):
         inputs = self.tokenizer.encode(text)
         if len(inputs) > self.block_size:
             half_size = self.block_size // 2
@@ -267,20 +295,28 @@ class TextSplitter(DefaultSplitter):
                 prefix[-1] = self.ellipsis_token_id
             inputs = prefix + suffix
         blocks.append(inputs)
-        self.token_counts.append(len(inputs))
+        inputs_size = len(inputs)
+        self.token_counts.append(inputs_size)
+        self.pad_count += self.block_size - inputs_size
 
-    def split(self, text:str, blocks: List[List[int]]):
-        if self.sep is not None:
-            t = text.split(self.sep)
-            if len(t) == 2:
-                self.tokenize_pair(t[0], t[1], blocks)
-                return
-            text = ''.join(t) # sep を取り除く
-        self.tokenize_text(text, blocks)
 
 class TextPairSplitter(DefaultSplitter):
     def __init__(self, tokenizer, block_size, sep=None):
         super().__init__(tokenizer, block_size, sep=sep)
+        self.split_prefix='seq2seq'
+
+    def tokenize_pair(self, text:str, text_pair: str, blocks: List[List[int]]):
+        inputs = self.tokenizer.convert_tokens_to_ids(self.tokenizer.tokenize(text))
+        labels = self.tokenizer.encode(text_pair)
+        if len(labels) > self.block_size:
+            # ラベルの方が大きい場合は諦める
+            return
+        if len(inputs)+len(labels) > self.block_size:
+            trimmed_size = self.block_size - len(labels)
+            inputs = inputs[:trimmed_size]
+            inputs[-1] = self.eos_token_id
+        blocks.append(inputs+labels)
+        self.token_counts.append(len(inputs+labels))
 
     def tokenize_pair(self, text:str, text_pair: str, blocks: List[List[int]]):
         inputs = self.tokenizer.encode(text)
@@ -304,5 +340,19 @@ class TextPairSplitter(DefaultSplitter):
         if len(t)==2:
             self.tokenize_pair(t[0], t[1], blocks)
         else:
-            raise ValueError(f'In text, the {self.sep} token is required.')
-    
+            raise ValueError(f'In text {repr(text)}, the {self.sep} token is required.')
+
+
+def new_TextSplitter(tokenizer, format='simple', block_size=1024, padding=True, sep=None):
+    if format == 'simple':
+        if padding:
+            splitter = SimpleTextSplitter(tokenizer, block_size=block_size, sep=sep)
+        else:
+            splitter = SimpleTextBlockSplitter(tokenizer, block_size=block_size, sep=sep)
+    elif format == 'multi':
+        splitter = MultiTextBlockSplitter(tokenizer, block_size=block_size, sep=sep)
+    elif format == 'seq2seq':
+        if not padding:
+            verbose_print("format='seq2seq'では、padding=Falseは無効です。")
+        splitter = TextPairSplitter(tokenizer, block_size=block_size, sep=sep)
+    return splitter

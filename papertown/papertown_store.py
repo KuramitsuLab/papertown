@@ -15,8 +15,10 @@ def setup_store():
     parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
     parser.add_argument("--store_path", default="store")
     parser.add_argument("--block_size", type=int, default=2048)
-    parser.add_argument("--format", default="")
-    parser.add_argument("--split", default=DEFAULT_SPLIT)
+    parser.add_argument("--format", default="simple")
+    parser.add_argument("--split", default="train")
+    parser.add_argument("--padding", type=_tobool, default=True)
+    parser.add_argument("--sep", type=str, default=None)
     parser.add_argument("--N", type=int, default=None)
     parser.add_argument("--num_works", type=int, default=0)
     hparams = parser.parse_args()  # hparams になる
@@ -28,7 +30,8 @@ def main_store():
     store = DatasetStore(tokenizer=tokenizer, 
                          block_size=hparams.block_size, 
                          dir=hparams.store_path)
-    store.upload(filename=hparams.files[0], format=hparams.format, split=hparams.split, N=hparams.N)
+    store.upload(filename=hparams.files[0], 
+                 format=hparams.format, split=hparams.split, padding=hparams.padding, sep=hparams.sep, N=hparams.N)
 
 
 

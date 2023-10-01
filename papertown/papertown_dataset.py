@@ -20,7 +20,7 @@ from torch.utils.data import Dataset
 
 from .papertown_utils import *
 from .papertown_tokenizer import *
-from .splitter import PretrainedTextSplitter, TextSplitter, TextPairSplitter, file_iterator
+from .splitter import new_TextSplitter, file_iterator
 
 _ID = 0
 def random_name():
@@ -188,114 +188,6 @@ def shuffle_chunk_files(base_dir:str, chunk_file:str, chunk_file2:str):
     save_chunk_file(base_dir, chunk_file, merged_chunks[:length])
     save_chunk_file(base_dir, chunk_file, merged_chunks[length:])
 
-"""
-empty_tokens = []
-
-def _block_simply(blocks: List[List[int]], tokens: List[int], block_size=DEFAULT_BLOCK_SIZE, fill=empty_tokens):
-    # とりあえず、シンプルにブロックを分割する
-    for i in range(0, len(tokens) - block_size + 1, block_size):  
-        segmented = tokens[i : i + block_size]
-        blocks.append(segmented)
-    remaining = len(tokens) % block_size
-    if remaining == 0: # 最後の分割が揃っていればおしまい
-        return fill
-    remaining_tokens = tokens[-remaining:] + fill
-    while len(remaining_tokens) >= block_size:
-        blocks.append(remaining_tokens[:block_size])
-        remaining_tokens = remaining_tokens[block_size:]
-    return remaining_tokens
-
-def tokenize_block_sep(tokenizer, blocks: List[List[int]], text:str, 
-                       block_size=DEFAULT_BLOCK_SIZE, 
-                       fill=empty_tokens, sep=DEFAULT_SEP, overlap=0):
-    chunks = [tokenizer.convert_tokens_to_ids(tokenizer.tokenize(line)) for line in text.split(sep)]
-    chunks[-1] = tokenizer.build_inputs_with_special_tokens(chunks[-1])
-    chunk = []
-    for ids in chunks:
-        prev_length = len(chunk)
-        chunk.extend(ids)
-        if len(chunk) >= block_size:
-            blocks.append(chunk[:block_size])
-            if block_size - prev_length < overlap:
-                chunk = _block_simply(blocks, ids, block_size)
-            else:
-                chunk = _block_simply(blocks, chunk[block_size:], block_size)
-    if len(chunk) > 4:
-        return _block_simply(blocks, chunk, block_size, fill)
-    return fill
-
-def tokenize_text(tokenizer, blocks, text, block_size=DEFAULT_BLOCK_SIZE):
-    inputs = tokenizer.encode(text)
-    if len(inputs) > block_size:
-        half_size = block_size // 2
-        prefix = inputs[:half_size]
-        suffix = inputs[-half_size:]
-        prefix[-1] = find_ellipsis_token_id(tokenizer)
-        inputs = prefix + suffix
-    blocks.append(inputs)
-    return empty_tokens
-
-def tokenize_pair(tokenizer, blocks, inputs, labels, block_size=DEFAULT_BLOCK_SIZE):
-    inputs = tokenizer.encode(inputs)
-    labels = tokenizer.encode(labels)
-    if len(labels) > block_size:
-        # ラベルの方が大きい場合は諦める
-        return empty_tokens
-    if len(inputs)+len(labels) > block_size:
-        # ラベルは完全に残す
-        half_size = (block_size - len(labels)) // 2
-        prefix = inputs[:half_size]
-        suffix = inputs[-half_size:]
-        prefix[-1] = find_ellipsis_token_id(tokenizer)
-        inputs = prefix + suffix
-    blocks.append(inputs+labels)
-    return empty_tokens
-
-def tokenize_line(tokenizer, blocks, line:str, 
-                  block_size=DEFAULT_BLOCK_SIZE, fill=empty_tokens,
-                  padding=False, jsonl_key='text', sep=DEFAULT_SEP, overlap=0):
-    if jsonl_key is not None:
-        d = json.loads(line)
-        if 'out' in d and 'in' in d:
-            return tokenize_pair(tokenizer, blocks, d['in'], d['out'], block_size=block_size)
-        if 'inputs' in d and 'labels' in d:
-            return tokenize_pair(tokenizer, blocks, d['inputs'], d['labels'], block_size=block_size)
-        line = d[jsonl_key]
-    else:
-        line = line.rstrip()
-    if padding:
-        return tokenize_text(tokenizer, blocks, line, block_size=block_size)
-    else:
-        return tokenize_block_sep(tokenizer, blocks, line, block_size, fill, sep, overlap)
-
-def tokenize_file(tokenizer, filename, update_fn=None, 
-           block_size=DEFAULT_BLOCK_SIZE, padding=True, overlap=0, N=None, jsonl_key='text', sep=DEFAULT_SEP):
-    if N == -1:
-        N = get_file_lines(filename)
-    if N:
-        from tqdm import tqdm
-        pbar = tqdm(total=N, desc=filename)
-    if '.jsonl' not in filename:
-        jsonl_key = None # jsonl でない
-    blocks=[]
-    fill = empty_tokens
-    with zopen(filename) as f:
-        line = f.readline()
-        c=1
-        while line:
-            fill = tokenize_line(tokenizer, blocks, line, block_size, fill, jsonl_key=jsonl_key, padding=padding, overlap=overlap, sep=sep)
-            if update_fn is not None:
-                update_fn(blocks)
-                blocks=[]
-            line = f.readline()
-            if N: 
-                pbar.update()
-                if c > N: break
-            c+=1
-    if N:
-        pbar.close()
-    return blocks
-"""
 
 def stat_tokens(counts):
     if len(counts) == 0:
@@ -376,21 +268,15 @@ class DatasetStore(object):
         for block in blocks:
             self.append(block)    
 
-    def upload(self, filename, format='pre', split='train', N=None, sep=DEFAULT_SEP):
-        if format == 'pre':
-            splitter = PretrainedTextSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
-            split = 'pretrain'
-        elif format == 'seq2seq':
-            splitter = TextPairSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
-            split = f'seq2seq_{split}'
-        else:
-            splitter = TextSplitter(self.tokenizer, block_size=self.block_size, sep=sep)
-            format = ''
-        self.split_prefix = safe_splitprefix(split)
+    def upload(self, filename, format='simple', split='train', padding=True, N=None, sep=None):
+        splitter = new_TextSplitter(self.tokenizer, format=format, block_size=self.block_size, padding=padding, sep=sep)
+        self.split_prefix = safe_splitprefix(splitter.split_prefix)+split
         iterator = file_iterator(filename, N=N, sep=sep)
         splitter.split_iter(iterator=iterator, update_fn=self.extend)
         splitter.report(self.config, verbose=True)
         self.config['format'] = format
+        self.config['split'] = split
+        self.config['padding'] = padding
         self.save()
         verbose_print(f'Tokens: {self.n_tokens:,} Items: {self.n_items:,} Blocks: {self.block_size:,}')
 
