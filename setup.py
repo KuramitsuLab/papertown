@@ -15,7 +15,7 @@ def _requires_from_file(filename):
 
 setup(
     name="papertown",
-    version="0.0.4",
+    version="0.0.10.1",
     license="MIT",
     author="Kimio Kuramitsu",
     description="The PaperTown LLM Project",
@@ -28,6 +28,7 @@ setup(
         "console_scripts": [
             "papertown_store=papertown.papertown_store:main_store",
             "papertown_testdata=papertown.papertown_store:main_testdata",
+	    "papertown_update=papertown.papertown_store:main_update",
         ]
     },
     classifiers=[

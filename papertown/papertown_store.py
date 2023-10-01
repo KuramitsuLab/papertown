@@ -61,6 +61,10 @@ def main_testdata():
         end = time.time()
         print(f'Total: {end-start:.1f}s Iterations: {hparams.N:,} {hparams.N/(end-start)}[it/s]')
 
+def main_update():
+    import os
+    os.system('pip3 uninstall -y papertown')
+    os.system('pip3 install -U git+https://github.com/kuramitsulab/papertown.git')
 
 """
 def setup_dump():
