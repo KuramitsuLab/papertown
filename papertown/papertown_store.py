@@ -13,7 +13,7 @@ def setup_store():
     parser = argparse.ArgumentParser(description="papertown_store")
     parser.add_argument("files", type=str, nargs="+", help="files")
     parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
-    parser.add_argument("--store_path", default="store")
+    parser.add_argument("--store_path", default=None)
     parser.add_argument("--block_size", type=int, default=2048)
     parser.add_argument("--format", default="simple")
     parser.add_argument("--split", default="train")
@@ -27,6 +27,15 @@ def setup_store():
 def main_store():
     hparams = setup_store()
     tokenizer = load_tokenizer(hparams.tokenizer_path)
+    if hparams.store_path is None:
+        _, _, token = hparams.tokenizer_path.rpartintion('/')
+        file = hparams.files[0]
+        if '/' in file:
+            _, _, file = file.rpartition('/')
+        file, _, _ = file.partition('.')
+        hparams.store_path=f'{token}/{file}'
+        verbose_print(f'Saving.. {hparams.store_path}')
+
     store = DatasetStore(tokenizer=tokenizer, 
                          block_size=hparams.block_size, 
                          dir=hparams.store_path)
