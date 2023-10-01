@@ -79,15 +79,17 @@ def print_model(model):
         print(f"num_layers: {model.config.num_layers}+{model.config.num_decoder_layers}")
         print(config)
     elif hasattr(config, 'n_embd'): #GPT-2
-        print(f"n_embed: {config.n_embd}", end=' ')
+        print(f"hidden_size: {config.n_embd}", end=' ')
+        print(f"intermediate_size: {config.n_inner}", end=' ')
+        print(f"n_dims: {config.n_embd//config.n_head}", end=' ')
         print(f"n_heads: {config.n_head}", end=' ')
         print(f"n_layers: {config.n_layer}")
         print(config)
     elif hasattr(config, 'hidden_size'): #GPT-NeoX
-        print(f"n_dims: {config.hidden_size//model.config.num_attention_heads}", end=' ')
-        print(f"n_heads: {config.num_attention_heads}", end=' ')
         print(f"hidden_size: {config.hidden_size}", end=' ')
         print(f"intermediate_size: {config.intermediate_size}", end=' ')
+        print(f"n_dims: {config.hidden_size//model.config.num_attention_heads}", end=' ')
+        print(f"n_heads: {config.num_attention_heads}", end=' ')
         print(f"n_layers: {config.num_hidden_layers}")
     else:
         print(config)
@@ -204,7 +206,7 @@ def new_T5(d_model=512, d_kv=32, d_ff=1024, n_head=6, n_layers=12, max_length=20
 
 # GPT-2
 
-def new_GPT2(max_length=2048, n_dims=512, n_heads=24, n_layers=24, tokenizer=DEFAULT_TOKENIZER):
+def new_GPT2(max_length=2048, n_dims=64, n_heads=6, n_layers=12, intermediate_size=1024, tokenizer=DEFAULT_TOKENIZER):
     from transformers import AutoTokenizer, GPT2LMHeadModel, GPT2Config
 
     if isinstance(tokenizer, str):
@@ -217,9 +219,10 @@ def new_GPT2(max_length=2048, n_dims=512, n_heads=24, n_layers=24, tokenizer=DEF
         pad_token_id = tokenizer.pad_token_id,
         n_positions=max_length,
         n_ctx=max_length,
-        n_embd=n_dims,
+        n_embd=n_dims*n_heads,
         n_head=n_heads,
         n_layer=n_layers,
+        n_inner=intermediate_size,
     )
 
     model = GPT2LMHeadModel(config)
@@ -228,7 +231,7 @@ def new_GPT2(max_length=2048, n_dims=512, n_heads=24, n_layers=24, tokenizer=DEF
 
 # GPTNeoX
 
-def new_GPTNeoX(max_length=2048, n_dims=512, n_heads=8, n_layers=24, intermediate_size=1024, tokenizer=DEFAULT_TOKENIZER):
+def new_GPTNeoX(max_length=2048, n_dims=128, n_heads=8, n_layers=24, intermediate_size=1024, tokenizer=DEFAULT_TOKENIZER):
     from transformers import AutoTokenizer, GPTNeoXForCausalLM, GPTNeoXConfig
     if isinstance(tokenizer, str):
         tokenizer = AutoTokenizer.from_pretrained(tokenizer, legacy=False, trust_remote_code=True, use_fast=False)
