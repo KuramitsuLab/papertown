@@ -78,16 +78,17 @@ def print_model(model):
         print(f"num_heads: {model.config.num_heads}", end=' ')
         print(f"num_layers: {model.config.num_layers}+{model.config.num_decoder_layers}")
         print(config)
+    elif hasattr(config, 'n_embd'): #GPT-2
+        print(f"n_embed: {config.n_embd}", end=' ')
+        print(f"n_heads: {config.n_head}", end=' ')
+        print(f"n_layers: {config.n_layer}")
+        print(config)
     elif hasattr(config, 'hidden_size'): #GPT-NeoX
         print(f"n_dims: {config.hidden_size//model.config.num_attention_heads}", end=' ')
         print(f"n_heads: {config.num_attention_heads}", end=' ')
         print(f"hidden_size: {config.hidden_size}", end=' ')
         print(f"intermediate_size: {config.intermediate_size}", end=' ')
         print(f"n_layers: {config.num_hidden_layers}")
-    elif hasattr(config, 'n_embd'): #GPT-2
-        print(f"n_embed: {config.n_embd}", end=' ')
-        print(f"n_heads: {config.n_head}", end=' ')
-        print(f"n_layers: {config.n_layer}")
     else:
         print(config)
 
