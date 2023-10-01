@@ -268,6 +268,7 @@ class MultiTextBlockSplitter(DefaultSplitter):
 class SimpleTextSplitter(DefaultSplitter):
     def __init__(self, tokenizer, block_size, sep=None):
         super().__init__(tokenizer, block_size, sep=sep)
+        self.split_prefix=''
 
     # def tokenize_pair(self, text:str, text_pair: str, blocks: List[List[int]]):
     #     inputs = self.tokenizer.convert_tokens_to_ids(self.tokenizer.tokenize(text))
