@@ -18,30 +18,53 @@ def count_parameters(model)->int:
     """
     return sum(p.numel() for p in model.parameters())
 
-def format_large_number(num: int)->str:
+def format_unit(num: int, scale=1000)->str:
     """
     大きな数をSI単位系に変換して返す
     """
-
-    if num < 1_000:
-        return str(num)
-    elif num < 1_000_000:
-        return f"{num / 1_000:.1f}K"
-    elif num < 1_000_000_000:
-        return f"{num / 1_000_000:.1f}M"
-    elif num < 1_000_000_000_000:
-        return f"{num / 1_000_000_000:.1f}G"
-    elif num < 1_000_000_000_000_000:
-        return f"{num / 1_000_000_000_000:.1f}T"
-    elif num < 1_000_000_000_000_000_000:
-        return f"{num / 1_000_000_000_000_000:.1f}P"
+    if scale == 1024:
+        if num < scale:
+            return str(num)
+        elif num < scale**2:
+            return f"{num / scale:.1f}K"
+        elif num < scale**3:
+            return f"{num / scale**2:.1f}M"
+        elif num < scale**4:
+            return f"{num / scale**3:.1f}G"
+        elif num < scale**5:
+            return f"{num / scale**4:.1f}T"
+        elif num < scale**6:
+            return f"{num / scale**5:.1f}P"
+        else:
+            return f"{num / scale**6:.1f}Exa"
+    elif scale == 60:
+        if num < 1.0:
+            return f"{num * 1000:.1f}ms"
+        if num < scale:
+            return f"{num:.1f}sec"
+        elif num < scale**2:
+            return f"{num / scale:.1f}min"
+        elif num < (scale**2)*24:
+            return f"{num / scale**2:.1f}hours"
+        else:
+            num2 = num2 % (scale**2)*24
+            return f"{num // (scale**2)*24}days {num2 / scale**2:.1f}hours"
     else:
-        return f"{num / 1_000_000_000_000_000_000:.1f}Exa"
+        if num < 1_000:
+            return str(num)
+        elif num < 1_000_000:
+            return f"{num / 1_000:.1f}K"
+        elif num < 1_000_000_000:
+            return f"{num / 1_000_000:.1f}M"
+        elif num < 1_000_000_000_000:
+            return f"{num / 1_000_000_000:.1f}B"
+        else:
+            return f"{num / 1_000_000_000_000:.1f}T"
 
 def print_model(model):
     n_parameters=count_parameters(model)
     config = model.config
-    print(f'Parameters: {format_large_number(n_parameters)} {n_parameters}', end=' ')
+    print(f'Parameters: {n_parameters} {format_unit(n_parameters)}', end=' ')
     if hasattr(config, 'max_position_embeddings'):
         print(f"max_length: {config.max_position_embeddings}", end=' ')
     elif hasattr(config, "n_positions"):
@@ -74,7 +97,7 @@ def print_gpu_utilization():
         nvmlInit()
         handle = nvmlDeviceGetHandleByIndex(0)
         info = nvmlDeviceGetMemoryInfo(handle)
-        print(f"GPU memory occupied: {info.used//1024**2} MB.")
+        print(f"GPU memory occupied: {format_unit(info.used, scale=1024)}iB.")
     except:
         pass
 
@@ -88,11 +111,11 @@ def dummy_dataset(max_length, dataset_size=1024):
 
 def print_summary(result, use_flash=False):
     m = result.metrics
-    print(f"Time: {m['train_runtime']:.2f}", end=' ')
+    print(f"Time: {m['train_runtime']:.2f}  {format_unit(m['train_runtime'], scale=60)}", end=' ')
     print(f"Samples/second: {m['train_samples_per_second']:.2f} FlashAttn={use_flash}")
     print(f"Global step: {result.global_step} batch_size: {1024//result.global_step}", end=' ')
     if 'total_flos' in m:
-        print(f"FLOS: {m['total_flos']} {format_large_number(m['total_flos'])} Loss: {m['train_loss']:.5f}")
+        print(f"FLOS: {m['total_flos']} {format_unit(m['total_flos'])} Loss: {m['train_loss']:.5f}")
     else:
         print(f"Loss: {m['train_loss']:.5f}")
     print_gpu_utilization()
@@ -228,7 +251,7 @@ def new_GPTNeoX(max_length=2048, n_dims=512, n_heads=8, n_layers=24, intermediat
 
 ## new_Lamma2
 
-def new_Llama2(max_length=2048, n_dims=512, n_heads=8, n_layers=28, intermediate_size=1024, tokenizer=DEFAULT_TOKENIZER):
+def new_Llama2(max_length=2048, n_dims=128, n_heads=8, n_layers=28, intermediate_size=4096, tokenizer=DEFAULT_TOKENIZER):
     from transformers import AutoTokenizer, LlamaForCausalLM, LlamaConfig
 
     if isinstance(tokenizer, str):
