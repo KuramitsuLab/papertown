@@ -15,7 +15,7 @@ def _requires_from_file(filename):
 
 setup(
     name="papertown",
-    version="0.0.10.1",
+    version="0.0.10.2",
     license="MIT",
     author="Kimio Kuramitsu",
     description="The PaperTown LLM Project",
