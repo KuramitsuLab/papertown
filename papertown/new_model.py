@@ -231,7 +231,7 @@ def new_GPT2(max_length=2048, n_dims=64, n_heads=6, n_layers=12, intermediate_si
 
 # GPTNeoX
 
-def new_GPTNeoX(max_length=2048, n_dims=128, n_heads=8, n_layers=24, intermediate_size=1024, tokenizer=DEFAULT_TOKENIZER):
+def new_GPTNeoX(max_length=2048, n_dims=64, n_heads=12, n_layers=12, intermediate_size=2048, tokenizer=DEFAULT_TOKENIZER):
     from transformers import AutoTokenizer, GPTNeoXForCausalLM, GPTNeoXConfig
     if isinstance(tokenizer, str):
         tokenizer = AutoTokenizer.from_pretrained(tokenizer, legacy=False, trust_remote_code=True, use_fast=False)

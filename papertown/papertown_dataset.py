@@ -270,7 +270,7 @@ class DatasetStore(object):
 
     def upload(self, filename, format='simple', split='train', padding=True, N=None, sep=None):
         splitter = new_TextSplitter(self.tokenizer, format=format, block_size=self.block_size, padding=padding, sep=sep)
-        self.split_prefix = safe_splitprefix(splitter.split_prefix)+split
+        self.split_prefix = safe_splitprefix(splitter.split_prefix+split)
         iterator = file_iterator(filename, N=N)
         splitter.split_iter(iterator=iterator, update_fn=self.extend)
         splitter.report(self.config, verbose=True)
