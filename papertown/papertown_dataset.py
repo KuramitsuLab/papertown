@@ -357,8 +357,8 @@ class ChunkedDataset(Dataset):
         if chunks is None:
             # エラーで落ちるくらいなら、キャッシュのデータで学習を続ける
             chunks = self.cache[self.queue[0]]
-        if self.shuffle:
-            random.shuffle(chunks)
+        # if self.shuffle:
+        #     random.shuffle(chunks)
         if len(self.queue) == 64:
             older = self.queue.popleft()
             if older in self.cache:
@@ -578,7 +578,7 @@ class DataComposer(Dataset):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.n_items=0
+        self.n_items = 0
         self.mixer = None
         if self.cleanup and os.path.isdir(self.cache_dir):
             try:
