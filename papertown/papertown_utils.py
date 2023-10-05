@@ -17,6 +17,13 @@ DEFAULT_TOKENIZER = os.environ.get('PT_TOKENIZER', 'kkuramitsu/kawagoe')
 DEFAULT_SPLIT='train'
 DEFAULT_CACHE_DIR = safe_dir(os.environ.get('PT_CACHE_DIR', '.'))
 
+def getint_from_environ(key, given=None, default=None):
+    if given:
+        return int(given)
+    try:
+        return int(os.environ.get(key, default))
+    except:
+        return default
 
 def zopen(filepath):
     if filepath.endswith('.gz'):

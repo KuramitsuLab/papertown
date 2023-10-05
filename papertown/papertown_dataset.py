@@ -30,7 +30,7 @@ def random_name():
 
 # 設定ファイル
 
-DEFAULT_BLOCK_SIZE = 2048
+DEFAULT_BLOCK_SIZE = 2096
 DEFAULT_MAX_LENGTH = 4096
 N_CHUNKS = 4096
 
@@ -506,17 +506,15 @@ def parse_url_list(url_list=[]):
         return url_list.split('|')
     return url_list
 
+
 class DataComposer(Dataset):
     def __init__(self, url_list, format="pre", split = DEFAULT_SPLIT, 
-                 max_length=DEFAULT_MAX_LENGTH, block_size=None,
+                 block_size=None, padding=False,
                  build_fn=build_inputs_for_clm, tokenizer=None, shuffle=True,
-                 cache_dir = DEFAULT_CACHE_DIR, use_filelock=True, prefetch=1):
-        if block_size is None:
-            self.max_length = max_length
-            self.padding=True
-        else:
-            self.max_length = min(max_length, block_size)
-            self.padding=False
+                 cache_dir = DEFAULT_CACHE_DIR, 
+                 use_filelock=True, prefetch=1, test_run=None):
+        self.block_size=block_size or DEFAULT_BLOCK_SIZE
+        self.padding=padding
         self.split = format + split
         self.cache_dir = f'{safe_dir(cache_dir)}/{random_name()}'
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -524,6 +522,9 @@ class DataComposer(Dataset):
         self.prefetch = prefetch
         self.build_fn = build_fn
         self._prepare_datasets(parse_url_list(url_list), tokenizer, block_size)
+        test_run = getint_from_environ('PT_TEST_RUN', test_run, None)
+        if test_run:
+            self.n_items = min(test_run, self.n_items)
 
     def _prepare_datasets(self, urls, tokenizer, block_size):
         self.n_items = 0
@@ -578,7 +579,22 @@ class DataComposer(Dataset):
     def __getitem__(self, idx):
         mix = len(self.mixer)
         item = self.mixer[idx % mix][idx]
-        return self.build_fn(item, self.max_length)
+        return self.build_fn(item, self.block_size)
+
+class PretrainComposer(DataComposer):
+    def __init__(self, url_list, **kwargs):
+        kwargs['padding'] = False
+        kwargs['format'] = 'pre'
+        kwargs['split'] = 'train'
+        DataComposer.__init__(self, url_list, **kwargs)
+
+
+class FinetuneComposer(DataComposer):
+    def __init__(self, url_list, split="train", **kwargs):
+        kwargs['padding'] = True
+        kwargs['format'] = ''
+        DataComposer.__init__(self, url_list, split=split, **kwargs)
+
 
 ## Seq2Seq
 
