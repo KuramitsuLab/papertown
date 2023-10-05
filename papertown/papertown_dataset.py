@@ -506,24 +506,32 @@ def parse_url_list(url_list=[]):
         return url_list.split('|')
     return url_list
 
+def get_rank():
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        return torch.distributed.get_rank()
+    else:
+        return 0
 
 class DataComposer(Dataset):
     def __init__(self, url_list, format="pre", split = DEFAULT_SPLIT, 
                  block_size=None, padding=False,
-                 build_fn=build_inputs_for_clm, tokenizer=None, shuffle=True,
-                 cache_dir = DEFAULT_CACHE_DIR, 
-                 use_filelock=True, prefetch=1, test_run=None):
+                 build_fn=build_inputs_for_clm, shuffle=True,
+                 cache_dir = DEFAULT_CACHE_DIR, tokenizer=None, 
+                 use_filelock=True, cleanup=True,
+                 prefetch=1, test_run=None):
         self.block_size=block_size or DEFAULT_BLOCK_SIZE
         self.padding=padding
         self.split = format + split
         self.cache_dir = f'{safe_dir(cache_dir)}/{random_name()}'
         os.makedirs(self.cache_dir, exist_ok=True)
         self.lock_file = f'{self.cache_dir}/lock' if use_filelock else None
+        self.cleanup = False if get_rank() > 0 else cleanup
         self.prefetch = prefetch
         self.build_fn = build_fn
         self._prepare_datasets(parse_url_list(url_list), tokenizer, block_size)
         test_run = getint_from_environ('PT_TEST_RUN', test_run, None)
-        if test_run:
+        if test_run and isinstance(test_run, int):
+            verbose_print('テスト実行', test_run)
             self.n_items = min(test_run, self.n_items)
 
     def _prepare_datasets(self, urls, tokenizer, block_size):
@@ -558,20 +566,26 @@ class DataComposer(Dataset):
             start, end = dataset.compact(start, end)
             ds = Indexer(dataset, start, end-start)
             self.n_items += len(ds)
-            verbose_print(f'{url} トークン数: {ds.get_num_of_tokens():,}')
-            self.n_tokens += ds.get_num_of_tokens()
+            n_tokens = ds.get_num_of_tokens()
+            verbose_print(f'{url} トークン数: {format_unit(n_tokens)} {n_tokens:,} 件数: {len(ds):,}')
+            self.n_tokens += n_tokens
             datasets.append(ds)
-        verbose_print(f'Total tokens: {self.n_tokens:,}')
-        self.mixer = _make_mixer(datasets)
+        verbose_print(f'合計トークン数: {self.n_tokens:,} {format_unit(self.n_tokens)}')
+        if self.n_items > 0:
+            self.mixer = _make_mixer(datasets)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self.n_items=0
         self.mixer = None
-        if os.path.isdir(self.cache_dir):
-            verbose_print(f'Cleaning up {self.cache_dir} ...')
-            shutil.rmtree(self.cache_dir)
+        if self.cleanup and os.path.isdir(self.cache_dir):
+            try:
+                shutil.rmtree(self.cache_dir)
+                verbose_print('Cleaned up', self.cache_dir)
+            except:
+                pass
 
     def __len__(self):
         return self.n_items
