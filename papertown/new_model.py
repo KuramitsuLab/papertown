@@ -47,7 +47,7 @@ def format_unit(num: int, scale=1000)->str:
         elif num < (scale**2)*24:
             return f"{num / scale**2:.1f}hours"
         else:
-            num2 = num2 % (scale**2)*24
+            num2 = num % (scale**2)*24
             return f"{num // (scale**2)*24}days {num2 / scale**2:.1f}hours"
     else:
         if num < 1_000:
