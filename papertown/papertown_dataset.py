@@ -205,8 +205,8 @@ def stat_tokens(counts):
     }
 
 def safe_splitprefix(s):
-    s = str(s)
-    if not s.endswith('_'):
+    s = str(s).strip()
+    if len(s) > 0 and not s.endswith('_'):
         return f'{s}_'
     return s
 
