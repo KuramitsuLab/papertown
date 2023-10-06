@@ -659,14 +659,13 @@ class DP(object):
         self.eos_token_id = tokenizer.eos_token_id
         self.extra_ids = find_extra_ids(tokenizer)
         self.newline_id = find_newline_token_id(tokenizer)
-        #print('@', self.newline_id, self.extra_ids)
 
     def __call__(self, data, max_length):
         index = 0
         start = 0
         size = min(max_length, len(data))
-        for length in np.random.poisson(self.lambda_, 1000):
-            start = start + max(1, length)
+        for i, length in enumerate(np.random.poisson(self.lambda_, 1000), start=1):
+            start = start + max(1, length) * i
             if start >= size:
                 break
             if data[start] != self.eos_token_id or data[start] != self.newline_id:

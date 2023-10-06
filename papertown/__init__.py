@@ -4,4 +4,5 @@ from papertown.papertown_dataset import (
     DatasetStore, DataComposer,
     FinetuneComposer, PretrainComposer,
     T5FinetuneComposer, T5PretrainComposer,
+    DP
 )

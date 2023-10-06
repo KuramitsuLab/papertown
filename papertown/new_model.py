@@ -18,48 +18,6 @@ def count_parameters(model)->int:
     """
     return sum(p.numel() for p in model.parameters())
 
-def format_unit(num: int, scale=1000)->str:
-    """
-    大きな数をSI単位系に変換して返す
-    """
-    if scale == 1024:
-        if num < scale:
-            return str(num)
-        elif num < scale**2:
-            return f"{num / scale:.1f}K"
-        elif num < scale**3:
-            return f"{num / scale**2:.1f}M"
-        elif num < scale**4:
-            return f"{num / scale**3:.1f}G"
-        elif num < scale**5:
-            return f"{num / scale**4:.1f}T"
-        elif num < scale**6:
-            return f"{num / scale**5:.1f}P"
-        else:
-            return f"{num / scale**6:.1f}Exa"
-    elif scale == 60:
-        if num < 1.0:
-            return f"{num * 1000:.1f}ms"
-        if num < scale:
-            return f"{num:.1f}sec"
-        elif num < scale**2:
-            return f"{num / scale:.1f}min"
-        elif num < (scale**2)*24:
-            return f"{num / scale**2:.1f}hours"
-        else:
-            num2 = num % (scale**2)*24
-            return f"{num // (scale**2)*24}days {num2 / scale**2:.1f}hours"
-    else:
-        if num < 1_000:
-            return str(num)
-        elif num < 1_000_000:
-            return f"{num / 1_000:.1f}K"
-        elif num < 1_000_000_000:
-            return f"{num / 1_000_000:.1f}M"
-        elif num < 1_000_000_000_000:
-            return f"{num / 1_000_000_000:.1f}B"
-        else:
-            return f"{num / 1_000_000_000_000:.1f}T"
 
 def print_model(model):
     n_parameters=count_parameters(model)
