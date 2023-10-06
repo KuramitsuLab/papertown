@@ -639,18 +639,48 @@ class MSP(object):
             if start > len(data):
                 break
         return {
-            "input_ids": torch.tensor(inputs[max_length//2], dtype=torch.long),
-            "labels": torch.tensor(outputs[max_length//2], dtype=torch.long),
+            "input_ids": torch.tensor(inputs[:max_length//2], dtype=torch.long),
+            "labels": torch.tensor(outputs[:max_length//2], dtype=torch.long),
         }
 
 class T5PretrainComposer(DataComposer):
-    def __init__(self, url_list, split="train", **kwargs):
-        DataComposer.__init__(self, url_list, format="pre", split=split, **kwargs)
+    def __init__(self, url_list, **kwargs):
+        kwargs['padding'] = False
+        kwargs['format'] = 'pre'
+        kwargs['split'] = 'train'
+        tokenizer = kwargs.get('tokenizer', None) or load_tokenizer()
+        kwargs['build_fn'] = MSP(tokenizer=tokenizer)
+        DataComposer.__init__(self, url_list, **kwargs)
 
 
 class T5FinetuneComposer(DataComposer):
-    def __init__(self, url_list, split="train", **kwargs):
-        DataComposer.__init__(self, url_list, format="seq2seq", split=split, **kwargs)
+    def __init__(self, url_list, **kwargs):
+        kwargs['padding'] = True
+        kwargs['format'] = 'seq2seq'
+        tokenizer = kwargs.get('tokenizer', None) or load_tokenizer()
+        kwargs['build_fn'] = Seq2seq(tokenizer=tokenizer)
+        DataComposer.__init__(self, url_list, **kwargs)
+
+
+class Seq2seq(object):
+    def __init__(self, tokenizer):
+        self.eos_token_id = tokenizer.eos_token_id
+
+    def __call__(self, data, max_length):
+        indices = np.where(data == self.eos_token_id)[0]
+        assert indices.size > 1, "seq2seqは、</s>で区切られた２文からなるべきです。"
+        index = indices[0]
+        inputs = data[:index+1]
+        labels = data[index+1:]
+        if len(inputs)+len(labels) >= max_length:
+            # 前半分と後ろ半分を連結する
+            half_size = (max_length - len(labels)) // 2
+            inputs = np.concatenate(inputs[:half_size], inputs[-half_size:])
+        return {
+            "input_ids": torch.tensor(inputs.astype(np.int64), dtype=torch.long),
+            "labels": torch.tensor(labels.astype(np.int64), dtype=torch.long),
+        }
+
 
 
 class DP(object):
@@ -672,25 +702,6 @@ class DP(object):
                 data[start] = self.extra_ids[index]
                 index+=1
         return torch.tensor(data[:max_length].astype(np.int64), dtype=torch.long)
-
-class Seq2seq(object):
-    def __init__(self, tokenizer):
-        self.eos_token_id = tokenizer.eos_token_id
-
-    def __call__(self, data, max_length):
-        indices = np.where(data == self.eos_token_id)[0]
-        assert indices.size > 1, "seq2seqは、</s>で区切られた２文からなるべきです。"
-        index = indices[0]
-        inputs = data[:index+1]
-        labels = data[index+1:]
-        if len(inputs)+len(labels) >= max_length:
-            # 前半分と後ろ半分を連結する
-            half_size = (max_length - len(labels)) // 2
-            inputs = np.concatenate(inputs[:half_size], inputs[-half_size:])
-        return {
-            "input_ids": torch.tensor(inputs.astype(np.int64), dtype=torch.long),
-            "labels": torch.tensor(labels.astype(np.int64), dtype=torch.long),
-        }
 
 """
 def build_inputs_for_seq2seq(data, max_length=None, target_max_length=None):
