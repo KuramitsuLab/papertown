@@ -325,7 +325,7 @@ class ChunkedDataset(Dataset):
         self.queue = deque(maxlen=64)
         self.cache = {}
         self.prefetch=prefetch
-        self.max_chunkseq = self.config.get("chunkseq", 1)
+        self.max_chunkseq = max(self.config.get("chunkseq", 1), 1)
         if self.prefetch > 0 and self.n_items > 0:
             self.try_prefetch(0)
 
