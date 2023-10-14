@@ -117,7 +117,7 @@ class ChunkedDataset(Dataset):
         return config
 
     def __len__(self):
-        return (self.n_items * self.n_subblocks // self.pair)
+        return self.n_items * self.n_subblocks
 
     def try_prefetch(self, chunkseq):
         chunk_file = chunkseq_to_filename(chunkseq % self.max_chunkseq, self.split_prefix, self.file_ext)
