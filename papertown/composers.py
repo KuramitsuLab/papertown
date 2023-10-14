@@ -278,7 +278,7 @@ class MixingDataset(Dataset):
             if id(ds) not in dd:
                 dd[id(ds)] = ds
                 n_items += len(ds)
-        n_times = min(n_times, self.n_items)
+        n_items = min(n_items, self.n_items)
         return MixingDataset(mixed, n_items, self.build_fn, self.max_length)
 
 
