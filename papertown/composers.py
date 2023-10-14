@@ -265,7 +265,7 @@ class MixingDataset(Dataset):
         return self.n_items
 
     def __getitem__(self, index):
-        data = self.mixer[index % self.mixing][index]
+        data = self.mixed[index % self.mixing][index]
         return self.build_fn(data, self.max_length)
 
     def get_valid_dataset(self, valid_split=0.1):
@@ -362,8 +362,9 @@ class DataComposer(MixingDataset):
             self.mixed.extend([ds]*dlen)
         random.seed(self.random_seed)
         random.shuffle(self.mixed)
+        self.mixing = len(self.mixed)
 
-    def prepare_tokenizer(self, tokenizer):
+    def prepare_tokenizer(self, tokenizer=None):
         if tokenizer is not None:
             return tokenizer
         if self.tokenizer_path is None:
