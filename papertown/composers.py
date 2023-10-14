@@ -112,7 +112,7 @@ class ChunkedDataset(Dataset):
         if self.block_size is not None and 'block_size' in config and self.block_size < config['block_size']:
             self.n_subblocks = config['block_size'] // self.block_size
             verbose_print(f'{self.url} を{self.n_subblocks}個に再分割します')
-        self.is_seq2seq = 'output_sep_token_id' in self.config
+        self.is_seq2seq = 'output_sep_token_id' in config
         self.config = config
         return config
 
