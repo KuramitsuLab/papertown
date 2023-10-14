@@ -357,11 +357,11 @@ class DataComposer(MixingDataset):
         mixer_base = (total // min(lens))+1
         lens = [int((dlen * mixer_base) / total) for dlen in lens]
         verbose_print('ミキサーパターン:', lens)
-        self.mixer = []
+        self.mixed = []
         for dlen, ds in zip(lens, datasets):
-            self.mixer.extend([ds]*dlen)
+            self.mixed.extend([ds]*dlen)
         random.seed(self.random_seed)
-        random.shuffle(self.mixer)
+        random.shuffle(self.mixed)
 
     def prepare_tokenizer(self, tokenizer):
         if tokenizer is not None:
@@ -386,7 +386,7 @@ class DataComposer(MixingDataset):
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.n_items = 0
-        self.mixer = None
+        self.mixed = None
         if self.cleanup and os.path.isdir(self.cache_dir):
             try:
                 shutil.rmtree(self.cache_dir)
@@ -394,13 +394,13 @@ class DataComposer(MixingDataset):
             except:
                 pass
 
-    def __len__(self):
-        return self.n_items
+    # def __len__(self):
+    #     return self.n_items
 
-    def __getitem__(self, idx):
-        mix = len(self.mixer)
-        item = self.mixer[idx % mix][idx]
-        return self.build_fn(item, self.max_length)
+    # def __getitem__(self, idx):
+    #     mix = len(self.mixer)
+    #     item = self.mixer[idx % mix][idx]
+    #     return self.build_fn(item, self.max_length)
 
 
 
