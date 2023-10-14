@@ -217,10 +217,10 @@ class DistributedIndexer(Dataset):
         self.valid_dataset = valid_dataset
         return self.valid_dataset
 
-    def get_num_of_tokens(self):
-        if len(self.dataset) == self.length:
-            return self.n_tokens
-        return self.n_tokens * self.length // len(self.dataset)
+    # def get_num_of_tokens(self):
+    #     if len(self.dataset) == self.length:
+    #         return self.n_tokens
+    #     return self.n_tokens * self.length // len(self.dataset)
 
 
 def build_inputs_for_clm(data, max_length):
@@ -253,6 +253,15 @@ def convert_to_number(value):
         except ValueError:
             return str(value)
 
+def _recalculate_length(mixed):
+    dd={}
+    n_items = 0
+    for ds in mixed:
+        if id(ds) not in dd:
+            dd[id(ds)] = ds
+            n_items += len(ds)
+    return n_items
+
 class MixingDataset(Dataset):
     def __init__(self, mixed, n_items, build_fn, max_length):
         self.mixed = mixed
@@ -269,17 +278,15 @@ class MixingDataset(Dataset):
         return self.build_fn(data, self.max_length)
 
     def get_valid_dataset(self, valid_split=0.1):
-        dd={}
         mixed = []
-        n_items = 0
         for ds in self.mixed:
             ds = ds.get_valid_dataset(valid_split)
             mixed.append(ds)
-            if id(ds) not in dd:
-                dd[id(ds)] = ds
-                n_items += len(ds)
-        n_items = min(n_items, self.n_items)
-        return MixingDataset(mixed, n_items, self.build_fn, self.max_length)
+        train_size = _recalculate_length(self.mixed)
+        valid_size = _recalculate_length(mixed)
+        verbose_error(f'訓練データ {train_size} 検証データ {valid_size}')
+        self.n_items = min(train_size, self.n_items)
+        return MixingDataset(mixed, min(valid_size, self.n_items // 4), self.build_fn, self.max_length)
 
 
 class DataComposer(MixingDataset):
