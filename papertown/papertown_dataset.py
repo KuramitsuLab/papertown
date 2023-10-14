@@ -18,9 +18,9 @@ import torch
 from transformers import AutoTokenizer
 from torch.utils.data import Dataset
 
-from .papertown_utils import *
-from .papertown_tokenizer import *
-from .splitter import new_TextSplitter, file_iterator
+from .commons import *
+from .tokenizers import *
+#from .splitters import new_TextSplitter, file_iterator
 
 _ID = 0
 def random_name():
@@ -189,20 +189,20 @@ def shuffle_chunk_files(base_dir:str, chunk_file:str, chunk_file2:str):
     save_chunk_file(base_dir, chunk_file, merged_chunks[length:])
 
 
-def stat_tokens(counts):
-    if len(counts) == 0:
-        return {'total': 0}
-    data = np.array(counts)
-    return {
-        'total': int(np.sum(data)),
-        'mean': float(np.mean(data)),
-        'std': float(np.var(data)) ** 0.5,
-        'max': int(np.max(data)),
-        '75%': int(np.percentile(data, 75)),
-        'median': int(np.median(data)),
-        '25%': int(np.percentile(data, 25)),
-        'min': int(np.min(data)),
-    }
+# def stat_tokens(counts):
+#     if len(counts) == 0:
+#         return {'total': 0}
+#     data = np.array(counts)
+#     return {
+#         'total': int(np.sum(data)),
+#         'mean': float(np.mean(data)),
+#         'std': float(np.var(data)) ** 0.5,
+#         'max': int(np.max(data)),
+#         '75%': int(np.percentile(data, 75)),
+#         'median': int(np.median(data)),
+#         '25%': int(np.percentile(data, 25)),
+#         'min': int(np.min(data)),
+#     }
 
 def safe_splitprefix(s):
     s = str(s).strip()
@@ -266,9 +266,11 @@ class DatasetStore(object):
 
     def extend(self, blocks: List[List[int]]):
         for block in blocks:
-            self.append(block)    
+            self.append(block)
+        return []   
 
-    def upload(self, filename, format='simple', split='train', padding=True, N=None, sep=None):
+    def upload(self, filename, 
+               format='simple', split='train', padding=True, N=None, sep=None):
         splitter = new_TextSplitter(self.tokenizer, format=format, block_size=self.block_size, padding=padding, sep=sep)
         self.split_prefix = safe_splitprefix(splitter.split_prefix+split)
         iterator = file_iterator(filename, N=N)
@@ -610,76 +612,6 @@ class FinetuneComposer(DataComposer):
         DataComposer.__init__(self, url_list, split=split, **kwargs)
 
 
-## Seq2Seq
-
-class MSP(object):
-    def __init__(self, tokenizer, lambda_=3):
-        self.lambda_ = lambda_
-        self.eos_token_id = tokenizer.eos_token_id
-        self.extra_ids = find_extra_ids(tokenizer)
-        self.newline_id = find_newline_token_id(tokenizer)
-
-    def __call__(self, data, max_length):
-        data = data.tolist()
-        inputs = tokens = []
-        outputs = masked = []
-        start=0
-        index=0
-        for length in np.random.poisson(self.lambda_, 1000):
-            end = start+max(1, length)
-            data_part = data[start:end]
-            tokens.extend(data_part)
-            if self.eos_token_id in data_part or self.newline_id in data_part:
-                masked.extend(data_part)
-            else:
-                masked.append(self.extra_ids[index%100])
-                index += 1
-                tokens,masked = masked, tokens
-            start = end
-            if start > len(data):
-                break
-        return {
-            "input_ids": torch.tensor(inputs[:max_length//2], dtype=torch.long),
-            "labels": torch.tensor(outputs[:max_length//2], dtype=torch.long),
-        }
-
-class T5PretrainComposer(DataComposer):
-    def __init__(self, url_list, **kwargs):
-        kwargs['padding'] = False
-        kwargs['format'] = 'pre'
-        kwargs['split'] = 'train'
-        tokenizer = kwargs.get('tokenizer', None) or load_tokenizer()
-        kwargs['build_fn'] = MSP(tokenizer=tokenizer)
-        DataComposer.__init__(self, url_list, **kwargs)
-
-
-class T5FinetuneComposer(DataComposer):
-    def __init__(self, url_list, **kwargs):
-        kwargs['padding'] = True
-        kwargs['format'] = 'seq2seq'
-        tokenizer = kwargs.get('tokenizer', None) or load_tokenizer()
-        kwargs['build_fn'] = Seq2seq(tokenizer=tokenizer)
-        DataComposer.__init__(self, url_list, **kwargs)
-
-
-class Seq2seq(object):
-    def __init__(self, tokenizer):
-        self.eos_token_id = tokenizer.eos_token_id
-
-    def __call__(self, data, max_length):
-        indices = np.where(data == self.eos_token_id)[0]
-        assert indices.size > 1, "seq2seqは、</s>で区切られた２文からなるべきです。"
-        index = indices[0]
-        inputs = data[:index+1]
-        labels = data[index+1:]
-        if len(inputs)+len(labels) >= max_length:
-            # 前半分と後ろ半分を連結する
-            half_size = (max_length - len(labels)) // 2
-            inputs = np.concatenate(inputs[:half_size], inputs[-half_size:])
-        return {
-            "input_ids": torch.tensor(inputs.astype(np.int64), dtype=torch.long),
-            "labels": torch.tensor(labels.astype(np.int64), dtype=torch.long),
-        }
 
 
 

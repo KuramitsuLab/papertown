@@ -15,20 +15,19 @@ def _requires_from_file(filename):
 
 setup(
     name="papertown",
-    version="0.0.10.5",
+    version="0.1", #.10.14",
     license="MIT",
     author="Kimio Kuramitsu",
     description="The PaperTown LLM Project",
-    url="https://github.com/kuramitsu/papertown",
+    url="https://github.com/kuramitsulab/papertown",
     packages=["papertown"],
     package_dir={"papertown": "papertown"},
     package_data={"papertown": ["*/*"]},
     install_requires=_requires_from_file("requirements.txt"),
     entry_points={
         "console_scripts": [
-            "papertown_store=papertown.papertown_store:main_store",
-            "papertown_testdata=papertown.papertown_store:main_testdata",
-	    "papertown_update=papertown.papertown_store:main_update",
+            "papertown_store=papertown.cli:main_store",
+	    "papertown_update=papertown.cli:main_update",
         ]
     },
     classifiers=[

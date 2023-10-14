@@ -4,7 +4,7 @@ import argparse
 from papertown import DatasetStore, DataComposer, load_tokenizer
 from tqdm import tqdm
 
-from .papertown_utils import *
+from .commons import *
 
 def _tobool(s):
     return s.lower() == 'true'

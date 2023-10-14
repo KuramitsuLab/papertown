@@ -7,7 +7,7 @@ from transformers import Trainer, TrainingArguments
 import numpy as np
 from datasets import Dataset
 
-from .papertown_utils import *
+from .commons import *
 
 def count_parameters(model)->int:
     """
@@ -128,7 +128,7 @@ def train_model(model, tokenizer, max_length, use_fp16=False, use_flash=False):
     print_gpu_utilization()
 
 
-def new_T5(d_model=512, d_kv=32, d_ff=1024, n_head=6, n_layers=12, max_length=2048, tokenizer=DEFAULT_TOKENIZER):
+def new_T5(d_model=256, d_kv=32, d_ff=1024, n_head=6, n_layers=12, max_length=2048, tokenizer=DEFAULT_TOKENIZER):
     from transformers import T5Config, T5ForConditionalGeneration, AutoTokenizer
 
     if isinstance(tokenizer, str):

@@ -6,10 +6,11 @@ import hashlib
 
 import torch
 from transformers import AutoTokenizer, T5Tokenizer
-from .papertown_utils import *
+from .commons import *
 
 DEFAULT_NL = os.environ.get('PT_NK', '<nL>')
 DEFAULT_SEP = os.environ.get('PT_SEP', '<seP>')
+DEFAULT_OUTPUT_SEP = os.environ.get('PT_OUTPUT_SEP', '<outpuT>')
 DEFAULT_ELLIPSIS = os.environ.get('PT_ELLIPSIS', '<ellipsiS>')
 
 def find_token_id(tokenizer: AutoTokenizer, *token: str)->int:
@@ -24,6 +25,9 @@ def find_newline_token_id(tokenizer: AutoTokenizer):
 
 def find_sep_token_id(tokenizer: AutoTokenizer):
     return find_token_id(tokenizer, DEFAULT_SEP, "<seP>", "<sep>")
+
+def find_output_sep_token_id(tokenizer: AutoTokenizer):
+    return find_token_id(tokenizer, DEFAULT_OUTPUT_SEP, "<outpuT>", "<output>")
 
 def find_ellipsis_token_id(tokenizer: AutoTokenizer):
     return find_token_id(tokenizer, DEFAULT_ELLIPSIS, "<ellipsiS>", "<ellipsis>", "<masK>", "<mask>", "<extra_id_99>")
@@ -187,7 +191,9 @@ def get_tokenizer_info(tokenizer: AutoTokenizer):
 def load_tokenizer(tokenizer_path=DEFAULT_TOKENIZER, adapt=True):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, legacy=False, trust_remote_code=True, use_fast=False)
     if adapt:
-        adapt_tokenizer(tokenizer)
+        newline_token_id = find_token_id(tokenizer, "<nL>")
+        if newline_token_id != tokenizer.unk_token_id:
+            adapt_tokenizer(tokenizer)
     return tokenizer
 
 
