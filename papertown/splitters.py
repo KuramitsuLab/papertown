@@ -451,6 +451,7 @@ class DatasetStore(object):
 
 
 def split_to_store(filename, N=-1,
+                   desc=None,
                    tokenizer_path=DEFAULT_TOKENIZER, 
                    training_type='',
                    format='simple', 
@@ -458,7 +459,7 @@ def split_to_store(filename, N=-1,
                    block_size=None, # DEFAULT_BLOCKSIZE 
                    store_path=None, 
                    verbose=True, histogram=False,
-                   kwargs={}):
+                   split_args={}):
     
     if isinstance(tokenizer_path, str):
         tokenizer = load_tokenizer(tokenizer_path)
@@ -473,11 +474,13 @@ def split_to_store(filename, N=-1,
 
     splitter = new_TextSplitter(tokenizer, training_type,
                                 format=format, block_size=block_size, 
-                                **kwargs)
+                                **split_args)
     
     prefix = f'{(splitter.prefix+split)}_'
-    store = DatasetStore(store_path, prefix, block_size, **kwargs)
+    store = DatasetStore(store_path, prefix, block_size, **split_args)
 
+    if desc:
+        store.config['desc'] = desc
     store.config['tokenizer_path'] = str(tokenizer.name_or_path)
     store.config['tokenizer'] = record_tokenizer(tokenizer)
     store.config['splitter'] = splitter.about()

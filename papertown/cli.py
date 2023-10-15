@@ -34,6 +34,7 @@ def _parse_args(args):
 def setup_store():
     parser = argparse.ArgumentParser(description="papertown_store")
     parser.add_argument("files", type=str, nargs="+", help="files")
+    parser.add_argument("--desc", type=str, default=None)
     parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
     parser.add_argument("--store_path", default=None)
     parser.add_argument("--block_size", type=int, default=None)
@@ -42,6 +43,7 @@ def setup_store():
     parser.add_argument("--split", default="train")
     parser.add_argument("--split_args", type=_parse_args, default=None)
     parser.add_argument("--sep", type=str, default=None)
+    parser.add_argument("--output", type=str, default=None)
     parser.add_argument("--N", "-N", type=int, default=-1)
     parser.add_argument("--verbose", type=_tobool, default=True)
     parser.add_argument("--histogram", type=_tobool, default=False)
@@ -52,8 +54,10 @@ def setup_store():
 def main_store():
     hparams = setup_store()
     split_to_store(
-        tokenizer_path=hparams.tokenizer_path,
+        hparams.files[0],
         N=hparams.N,
+        desc=hparams.desc,
+        tokenizer_path=hparams.tokenizer_path,
         training_type=hparams.type,
         format=hparams.format,
         split=hparams.split,
