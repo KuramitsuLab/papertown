@@ -13,6 +13,7 @@ from typing import List
 
 import numpy as np
 import gzip
+import pyzstd
 
 from tqdm import tqdm
 
@@ -57,6 +58,8 @@ def get_filebase(filename):
 def zopen(filepath):
     if filepath.endswith('.gz'):
         return gzip.open(filepath, 'rt')
+    elif filepath.endswith('.zstd'):
+        return pyzstd.open(filepath, 'rt')
     else:
         return open(filepath, 'r')
 
