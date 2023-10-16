@@ -48,7 +48,7 @@ class T5PretrainComposer(DataComposer):
 
     def get_collator(self):
         tokenizer = load_tokenizer(self.tokenizer_path)
-        return DataCollatorForSeq2Seq(tokenizer, mlm=False)
+        return DataCollatorForSeq2Seq(tokenizer)
 
 class Seq2seq(object):
 
@@ -76,7 +76,7 @@ class T5FinetuneComposer(DataComposer):
 
     def get_collator(self):
         tokenizer = load_tokenizer(self.tokenizer_path)
-        return DataCollatorForSeq2Seq(tokenizer, mlm=False)
+        return DataCollatorForSeq2Seq(tokenizer)
 
     def get_eval_dataset(self):
         raise NotImplementedError()
