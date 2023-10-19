@@ -291,7 +291,7 @@ class MixingDataset(Dataset):
 
 class DataComposer(MixingDataset):
     def __init__(self, 
-                 url_list, training_type="pre", split = DEFAULT_SPLIT, 
+                 url_list, training_type="pre", split = 'train', 
                  block_size=None, max_length = DEFAULT_MAX_LENGTH,
                  build_fn=build_inputs_for_clm, 
                  cache_dir = DEFAULT_CACHE_DIR, 

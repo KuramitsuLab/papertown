@@ -36,7 +36,7 @@ def setup_store():
     parser.add_argument("files", type=str, nargs="+", help="files")
     parser.add_argument("--desc", type=str, default=None)
     parser.add_argument("--tokenizer_path", default=DEFAULT_TOKENIZER)
-    parser.add_argument("--store_path", default=None)
+    parser.add_argument("--store_path", default=None)q
     parser.add_argument("--block_size", type=int, default=None)
     parser.add_argument("--type", type=str, default='')
     parser.add_argument("--format", default="simple")
@@ -54,7 +54,7 @@ def setup_store():
 def main_store():
     hparams = setup_store()
     split_to_store(
-        hparams.files[0],
+        hparams.files,
         N=hparams.N,
         desc=hparams.desc,
         tokenizer_path=hparams.tokenizer_path,
