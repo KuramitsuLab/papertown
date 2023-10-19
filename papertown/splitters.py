@@ -414,7 +414,7 @@ class DatasetStore(object):
         return []   
 
 
-def split_to_store(filename, N=-1,
+def split_to_store(filenames, N=-1,
                    desc=None,
                    tokenizer_path=DEFAULT_TOKENIZER, 
                    training_type='',
@@ -430,7 +430,7 @@ def split_to_store(filename, N=-1,
     else:
         tokenizer = tokenizer_path
 
-    filebase = get_filebase(filename)
+    filebase = get_filebase(filenames[0])
     if store_path is None:
         _, _, tokenizer_name = tokenizer_path.rpartition('/')
         store_path=f'{tokenizer_name}/{filebase}'
@@ -441,6 +441,7 @@ def split_to_store(filename, N=-1,
                                 **split_args)
     
     prefix = f'{(splitter.prefix+split)}_'
+
     store = DatasetStore(store_path, prefix, block_size, **split_args)
 
     if desc:
@@ -449,8 +450,9 @@ def split_to_store(filename, N=-1,
     store.config['tokenizer'] = record_tokenizer(tokenizer)
     store.config['splitter'] = splitter.about()
 
-    iterator = file_iterator(filename, N=N)
-    splitter.split_iter(iterator=iterator, update_fn=store.extend)
+    for filename in filenames:
+        iterator = file_iterator(filename, N=N)
+        splitter.split_iter(iterator=iterator, update_fn=store.extend)
     splitter.report(store.config, verbose=verbose)
     store.save()
     print(store.config)

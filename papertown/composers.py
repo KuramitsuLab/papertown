@@ -306,14 +306,14 @@ class DataComposer(MixingDataset):
         self.cache_dir = f'{safe_dir(cache_dir)}/{random_name()}'
         os.makedirs(self.cache_dir, exist_ok=True)
         self.lock_file = f'{self.cache_dir}/lock.me' if use_filelock else None
-        self.random_seed=getint_from_environ('PT_RANDOM_SEED', random_seed, 42)
+        self.random_seed=getint_from_environ('KG_RANDOM_SEED', random_seed, 42)
         self.tokenizer_path = None
         self.prepare_data(parse_url_list(url_list), block_size, tokenizer)
         self.cleanup = False if get_rank() > 0 else cleanup
         self.prefetch = prefetch
         self.build_fn = build_fn
         # テスト実行
-        test_run = getint_from_environ('PT_TEST_RUN', test_run, None)
+        test_run = getint_from_environ('KG_TEST_RUN', test_run, None)
         if test_run and isinstance(test_run, int):
             verbose_print('反復を減らして、テスト実行します', test_run)
             self.n_items = min(test_run, self.n_items)
