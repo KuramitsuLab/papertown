@@ -421,6 +421,7 @@ def split_to_store(filenames, N=-1,
                    format='simple', 
                    split='train',
                    block_size=None, # DEFAULT_BLOCKSIZE 
+                   shuffle=True, random_seed=42,
                    store_path=None, 
                    verbose=True, histogram=False,
                    split_args={}):
@@ -453,6 +454,9 @@ def split_to_store(filenames, N=-1,
     for filename in filenames:
         iterator = file_iterator(filename, N=N)
         splitter.split_iter(iterator=iterator, update_fn=store.extend)
+    if shuffle:
+        verbose_print('シャッフルします')
+        shuffle_chunk_files(store.chunk_files, random_seed=random_seed)
     splitter.report(store.config, verbose=verbose)
     store.save()
     print(store.config)

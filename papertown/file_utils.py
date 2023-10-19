@@ -208,7 +208,10 @@ def save_chunk_file(base_dir:str, chunk_file:str, chunks:List[np.ndarray]):
     #         'sha1': get_file_sha1(filepath)}
 
 def load_chunk_file(base_dir:str, chunk_file:str=None):
-    filepath = safe_join_path(base_dir, chunk_file)
+    if base_dir=='':
+        filepath = chunk_file
+    else:
+        filepath = safe_join_path(base_dir, chunk_file)
     try:
         #if filepath.endswith('.npz'):
         npz = np.load(filepath)
@@ -240,12 +243,16 @@ def make_chunk_filelist(base_dir:str, chunk_files:List[str]):
         d[chunk_file] = checks
     return d
 
-def shuffle_chunk_files(base_dir:str, chunk_file:str, chunk_file2:str):
-    assert chunk_file != chunk_file2
-    chunks = load_chunk_file(base_dir, chunk_file)
-    chunks2 = load_chunk_file(base_dir, chunk_file2)
-    length = len(chunks)
-    merged_chunks = chunks+chunks2
-    random.shuffle(merged_chunks)
-    save_chunk_file(base_dir, chunk_file, merged_chunks[:length])
-    save_chunk_file(base_dir, chunk_file, merged_chunks[length:])
+def shuffle_chunk_files(files:List[str], random_seed=42):
+    random.seed(random_seed)
+    for _ in range(4):
+        random.shuffle(files)
+        for i in range(len(files)-1, 2):
+            chunks = load_chunk_file('', files[i])
+            chunks2 = load_chunk_file('', files[i+1])
+            length = len(chunks)
+            merged_chunks = chunks+chunks2
+            random.shuffle(merged_chunks)
+            save_chunk_file('', files[i], merged_chunks[:length])
+            save_chunk_file('', files[i+1], merged_chunks[length:])
+
