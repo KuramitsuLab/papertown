@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union, Tuple
 import random
 import json
 import numpy as np
@@ -262,21 +262,38 @@ class MultiTextBlockSplitter(DefaultSplitter):
             logs['block_size'] = self.block_size
             logs['work_size'] = self.work_size
 
-class TextPairSplitter(DefaultSplitter):
+class SimpleTextSplitter(DefaultSplitter):
     def __init__(self, tokenizer, block_size, **kwargs):
         super().__init__(tokenizer, block_size, **kwargs)
         self.prefix=''
         self.output_sep_token_id = find_token_id(tokenizer, 
                                                  kwargs.get('output_sep', '<outpuT>'), 
                                                  kwargs.get('sep', '<seP>'), 
-                                                 '<nL>')
+                                                 '<sep>', '<nL>', '\n')
 
     def report(self, logs: dict = None, verbose=True):
         super().report(logs, verbose=verbose)
         if self.output_sep_token_id is not None:
             logs['output_sep_token_id'] = self.output_sep_token_id            
-        if self.sep is not None:
-            logs['corpus_sep'] = self.sep            
+
+    def trancate_text(self, inputs: List[int], blocks: List[List[int]]):
+        if self.block_size is not None:
+            inputs_size = len(inputs)
+            if inputs_size > self.block_size:
+                if inputs_size - self.block_size > self.trancate_size:
+                    # 切り詰めが大きすぎる
+                    return
+                half_size = self.block_size // 2
+                prefix = inputs[:half_size]
+                suffix = inputs[-half_size:]
+                if self.ellipsis_token_id:
+                    prefix[-1] = self.ellipsis_token_id
+                inputs = prefix + suffix
+                self.trimmed_size += (inputs_size - len(inputs))
+            else:
+                self.padded_size += self.block_size - inputs_size
+        blocks.append(inputs)
+        self.output_sep_token_id = None
 
     def trancate_pair(self, inputs: List[int], labels: List[int], blocks: List[List[int]]):
         if self.block_size is not None:
@@ -296,59 +313,13 @@ class TextPairSplitter(DefaultSplitter):
         inputs[-1] = self.output_sep_token_id
         blocks.append(inputs+labels+[index])
 
-    def split(self, text:str, blocks: List[List[int]]):
-        t = text.split(self.sep)
-        if len(t)==2:
-            inputs = self.encode_and_count(t[0])        
-            labels = self.encode_and_count(t[1])
+    def split(self, text:Union[str, Tuple[str,str]], blocks: List[List[int]]):
+        if isinstance(text, tuple):
+            inputs = self.encode_and_count(text[0])        
+            labels = self.encode_and_count(text[1])
             self.trancate_pair(inputs, labels, blocks)
         else:
-            print(self.sep, text)
-            raise ValueError(f'In text, the {self.sep} token is required.')
-
-class SimpleTextSplitter(TextPairSplitter):
-    def __init__(self, tokenizer, block_size, **kwargs):
-        super().__init__(tokenizer, block_size, **kwargs)
-        # セパレータ字句があるか調べる
-        # self.sep: コーパス上のセパレータ
-        # self.output_sep トークンナイザのセパレータ
-        self.output_sep_token_id = None
-        self.output_sep = str(kwargs.get('output_sep', self.sep))
-        if self.output_sep:
-            self.output_sep_token_id = find_token_id(tokenizer, self.output_sep)
-            if self.output_sep_token_id == tokenizer.unk_token_id:
-                verbose_print(f'undefined token {self.output_sep} in {tokenizer.name_or_path}')
-                self.output_sep_token_id = None            
-
-    def trancate_text(self, inputs: List[int], labels: List[int], blocks: List[List[int]]):
-        if self.block_size is not None:
-            inputs_size = len(inputs)
-            if inputs_size > self.block_size:
-                if inputs_size - self.block_size > self.trancate_size:
-                    # 切り詰めが大きすぎる
-                    return
-                half_size = self.block_size // 2
-                prefix = inputs[:half_size]
-                suffix = inputs[-half_size:]
-                if self.ellipsis_token_id:
-                    prefix[-1] = self.ellipsis_token_id
-                inputs = prefix + suffix
-                self.trimmed_size += (inputs_size - len(inputs))
-            else:
-                self.padded_size += self.block_size - inputs_size
-        blocks.append(inputs)
-
-    def split(self, text:str, blocks: List[List[int]]):
-        if self.sep:
-            text = text.replace(self.sep, self.output_sep, 1)
-        inputs = self.encode_and_count(text)
-        if self.output_sep_token_id is not None:
-            index = inputs.find(self.output_sep_token_id)
-            if index == -1:
-                sep = self.sep or self.output_sep
-                raise ValueError(f'{sep} が見つかりません')
-            self.trancate_pair(inputs[:index+1], inputs[index+1:], blocks)
-        else:
+            inputs = self.encode_and_count(text)
             self.trancate_text(inputs, blocks)
 
 def new_TextSplitter(tokenizer, training_type, format='simple', block_size=None, **kwargs):
@@ -363,13 +334,6 @@ def new_TextSplitter(tokenizer, training_type, format='simple', block_size=None,
             if format != 'simple':
                 verbose_print(f"format={format}は、サポートされていません。")
         splitter = SimpleTextBlockSplitter(tokenizer, block_size, **kwargs)
-    elif training_type.startswith('seq2seq'):
-        # if splitter is None:
-        #     if format != 'simple':
-        #         verbose_print(f"format={format}は、サポートされていません。")
-        if 'sep' not in kwargs:
-            kwargs['sep'] = '<outpuT>'
-        splitter = TextPairSplitter(tokenizer, block_size, **kwargs)
     else: # ファインチューニング用
         # if splitter is None:
         #     if format != 'simple':

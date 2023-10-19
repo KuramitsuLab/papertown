@@ -65,11 +65,11 @@ def zopen(filepath):
 
 def get_filelines(filepath):
     with zopen(filepath) as f:
+        c=0
         line = f.readline()
-        c=1
         while line:
-            line = f.readline()
             c+=1
+            line = f.readline()
     return c
 
 def parse_strip(s):
@@ -78,12 +78,12 @@ def parse_strip(s):
 def parse_jsonl(line):
     d = json.loads(line)
     if 'out' in d:
-        return f"{d['in']}<outpuT>{d['out']}"
+        return d['in'], d['out']
     return d['text']
 
 def file_iterator(filename, N=None, kwargs={}):
     if N == -1:
-        N = get_filelines(filename)-1
+        N = get_filelines(filename)
     if N:
         from tqdm import tqdm
         pbar = tqdm(total=N, desc=filename)
@@ -102,7 +102,6 @@ def file_iterator(filename, N=None, kwargs={}):
             line = f.readline()
     if N:
         pbar.close()
-
 
 
 def _remove_heading_nL(s):
