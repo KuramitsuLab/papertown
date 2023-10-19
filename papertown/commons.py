@@ -44,8 +44,7 @@ DEFAULT_CACHE_DIR = safe_dir(os.environ.get('KG_CACHE_DIR', '.'))
 DEFAULT_BLOCK_SIZE = getint_from_environ('KG_BLOCK_SIZE', 2048)
 DEFAULT_MAX_LENGTH = 4096
 N_CHUNKS = 4096
-
-
+CHUNK_MAGIC = 8
 
 def format_unit(num: int, scale=1000)->str:
     """

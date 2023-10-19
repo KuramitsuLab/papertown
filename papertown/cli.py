@@ -67,7 +67,9 @@ def main_store():
         split_args=hparams.split_args or {},
         block_size=hparams.block_size, 
         shuffle=hparams.shuffle,
+        random_seed=hparams.random_seed,
         store_path=hparams.store_path,
+        validation=True,
         verbose=hparams.verbose, 
         histogram=hparams.histogram
     )

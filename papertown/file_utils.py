@@ -181,7 +181,12 @@ def resolve_file(url_base, file_path, cache_dir, sync=True):
                 return cache_file
         touch(cache_file)
         subprocess.call(cmd, shell=True)
-        verbose_print(f'Downloaded {get_filesize(cache_file):,} bytes:', cmd)
+        cache_file_size = get_filesize(cache_file)
+        if cache_file_size == 0:
+            verbose_print(f'ダウンロード失敗 file={cache_file} {cache_file_size} bytes', cmd)
+            os.remove(cache_file)
+        else:
+            verbose_print(f'Downloaded {get_filesize(cache_file):,} bytes:', cmd)
         return cache_file
 
     if get_filesize(cache_file) == -1:
@@ -217,7 +222,7 @@ def load_chunk_file(base_dir:str, chunk_file:str=None):
         npz = np.load(filepath)
         return [npz[n] for n in npz.files]
     except BaseException as e:
-        verbose_print(f'broken chunk file {chunk_file}: {e}')
+        verbose_print(f'チャンクファイルの破損 {filepath}: 原因 {e}')
         return None
 
 def check_chunk_file(base_dir:str, chunk_file:str, checks: dict):

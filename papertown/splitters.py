@@ -42,11 +42,11 @@ class DefaultSplitter(object):
         self.pad_token_id = getint(kwargs, 'pad_token_id', tokenizer.pad_token_id)
         self.eos_token_id = getint(kwargs, 'eos_token_id', tokenizer.eos_token_id)
         self.ellipsis_token_id = find_ellipsis_token_id(tokenizer)
-        # self.output_token_id = None # <sftの場合>
         self.trancate_size=getint(kwargs, 'trancate_size', 0)
         self.sep = kwargs.get('sep', None)
         self.token_counts = []
         self.text_length_count = 0
+        self.drop_count = 0
         self.trimmed_size = 0
         self.padded_size = 0
     
@@ -92,6 +92,11 @@ class DefaultSplitter(object):
                 print(f'padding: {self.padded_size:,} {self.padded_size*100/token_count:.2f}%')
             if logs:
                 logs['padding_rate'] = self.padded_size / token_count
+        if self.drop_count > 0:
+            if verbose:
+                print(f'drops: {self.drop_count:,}')
+            if logs:
+                logs['drops'] = self.drop_count
 
 
 class SimpleTextBlockSplitter(DefaultSplitter):
@@ -280,6 +285,7 @@ class SimpleTextSplitter(DefaultSplitter):
             if inputs_size > self.block_size:
                 if inputs_size - self.block_size > self.trancate_size:
                     # 切り詰めが大きすぎる
+                    self.drop_count +=1
                     return
                 half_size = self.block_size // 2
                 prefix = inputs[:half_size]
@@ -290,18 +296,19 @@ class SimpleTextSplitter(DefaultSplitter):
                 self.trimmed_size += (inputs_size - len(inputs))
             else:
                 self.padded_size += self.block_size - inputs_size
-        blocks.append(inputs)
-        self.output_sep_token_id = None
+        blocks.append([0] + inputs)
 
     def trancate_pair(self, inputs: List[int], labels: List[int], blocks: List[List[int]]):
         if self.block_size is not None:
             if len(labels) > self.block_size:
                 # ラベルの方が大きい場合は諦める
+                self.drop_count +=1
                 return
             if len(inputs)+len(labels) > self.block_size:
                 trimmed_size = self.block_size - len(labels)
                 if len(inputs) - trimmed_size > self.trancate_size:
                     # 諦める                
+                    self.drop_count +=1
                     return
                 self.trimmed_size += len(inputs) - trimmed_size
                 inputs = inputs[:trimmed_size]
@@ -309,7 +316,7 @@ class SimpleTextSplitter(DefaultSplitter):
                 self.padded_size += self.block_size - (len(inputs)+len(labels))
         index = len(inputs)
         inputs[-1] = self.output_sep_token_id
-        blocks.append(inputs+labels+[index])
+        blocks.append([(index * CHUNK_MAGIC) + 1] + inputs + labels)
 
     def split(self, text:Union[str, Tuple[str,str]], blocks: List[List[int]]):
         if isinstance(text, tuple):
@@ -319,6 +326,8 @@ class SimpleTextSplitter(DefaultSplitter):
         else:
             inputs = self.encode_and_count(text)
             self.trancate_text(inputs, blocks)
+            self.output_sep_token_id = None
+
 
 def new_TextSplitter(tokenizer, training_type, format='simple', block_size=None, **kwargs):
     splitter = None
@@ -370,7 +379,16 @@ class DatasetStore(object):
         self.n_tokens = 0
         self.chunk_files = []
 
-    def save_config(self):
+    def validate(self, validation=True):
+        if validation:
+            file_checks = make_chunk_filelist(self.store_path, self.chunk_files)
+            if file_checks:
+                self.config['files'] = file_checks
+        config_file = safe_join_path(self.store_path, f'{self.prefix}config.json')
+        with open(config_file, "w") as w:
+            json.dump(self.config, w)
+
+    def save_config(self, validation=False):
         self.config.update(dict(
             n_items=self.n_items,
             n_tokens = self.n_tokens,
@@ -379,14 +397,8 @@ class DatasetStore(object):
             file_ext=self.file_ext,
             shuffle=self.shuffle,
         ))
-        file_checks = make_chunk_filelist(self.store_path, self.chunk_files)
-        if file_checks:
-            self.config['files'] = file_checks
-        
-        config_file = safe_join_path(self.store_path, f'{self.prefix}config.json')
-        with open(config_file, "w") as w:
-            json.dump(self.config, w)
-    
+        self.validate(validation=False)
+
     def save(self, save_config=True):
         if len(self.bufs) > 0:
             chunk_file = chunkseq_to_filename(self.chunkseq, self.prefix, self.file_ext)
@@ -397,7 +409,7 @@ class DatasetStore(object):
                 self.chunkseq += 1
                 self.bufs = []
         if save_config:
-            self.save_config()
+            self.save_config(validation=False)
             verbose_print(f'トークン数: {self.n_tokens:,} 件数: {self.n_items:,}')
 
     def append(self, block: List[int]):
@@ -435,7 +447,7 @@ def split_to_store(filenames, N=-1,
                    block_size=None, # DEFAULT_BLOCKSIZE 
                    shuffle=True, random_seed=42,
                    store_path=None, 
-                   verbose=True, histogram=False,
+                   verbose=True, histogram=False, validation=False,
                    split_args={}):
     
     if isinstance(tokenizer_path, str):
@@ -475,11 +487,15 @@ def split_to_store(filenames, N=-1,
     if shuffle:
         verbose_print('シャッフルします')
         shuffle_chunk_files(store.chunk_files, random_seed=random_seed)
+
     splitter.report(store.config, verbose=verbose)
     store.save()
     print(store.config)
+    if validation:
+        store.validate()
     if histogram:
         make_histogram(tokenizer, store_path, store.chunk_files, verbose=verbose)
+
     if len(val_files) > 0:
         verbose_print('split="valid"も作成します')
         split_to_store(val_files, 
@@ -491,7 +507,7 @@ def split_to_store(filenames, N=-1,
                        block_size=block_size,   
                        shuffle=shuffle, random_seed=random_seed,
                        store_path=store_path, 
-                       verbose=verbose, histogram=False,
+                       verbose=verbose, histogram=False, validation=validation,
                        split_args=split_args)
 
 

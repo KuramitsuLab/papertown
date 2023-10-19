@@ -111,7 +111,9 @@ class ChunkedDataset(Dataset):
         self.n_subblocks = 1
         if self.block_size is not None and 'block_size' in config and self.block_size < config['block_size']:
             self.n_subblocks = config['block_size'] // self.block_size
-            verbose_print(f'{self.url} を{self.n_subblocks}個に再分割します')
+            if self.n_subblocks > 1:
+                self.n_chunks = self.n_chunks * self.n_subblocks
+                verbose_print(f'{self.url} は、{self.n_subblocks}個に再分割されます')
         self.is_seq2seq = 'output_sep_token_id' in config
         self.config = config
         return config
@@ -144,11 +146,12 @@ class ChunkedDataset(Dataset):
         return chunks
 
     def resize_chunks(self, chunks):
-        if self.n_subblocks > 1:
+        if chunks and self.n_subblocks > 1:
             newchunks=[]
             for chunk in chunks:
                 splits = np.array_split(chunk, self.n_subblocks)
                 newchunks.extend(splits)
+            assert len(newchunks) == len(chunks) * self.n_subbloks
             return newchunks
         return chunks
 
@@ -426,6 +429,19 @@ class PretrainComposer(DataComposer):
         tokenizer = load_tokenizer(self.tokenizer_path)
         return DataCollatorForLanguageModeling(tokenizer, mlm=False)
 
+def build_inputs_for_instruct(data, max_length):
+    # version = data[0] % CHUNK_MAGIC
+    return torch.tensor(data[1:max_length+1].astype(np.int64), dtype=torch.long)
+
+def build_inputs_attn_for_instruct(data, max_length):
+    # version = data[0] % CHUNK_MAGIC
+    input_ids = torch.tensor(data[1:max_length+1].astype(np.int64), dtype=torch.long)
+    attention_mask=torch.ones(len(data), dtype=torch.long)
+    return {
+        'input_ids': input_ids,
+        'attention_mask': attention_mask, 
+    }
+
 
 class FinetuneComposer(DataComposer):
     def __init__(self, url_list, split="train", **kwargs):
@@ -434,6 +450,10 @@ class FinetuneComposer(DataComposer):
             kwargs['max_length'] = kwargs['block_size']
             del kwargs['block_size']
         DataComposer.__init__(self, url_list, split=split, **kwargs)
+        if kwargs.get('use_attention_mask', False):
+            self.build_fn = kwargs.get('build_fn', build_inputs_attn_for_instruct)
+        else:
+            self.build_fn = kwargs.get('build_fn', build_inputs_for_instruct)
 
     def get_collator(self):
         tokenizer = load_tokenizer(self.tokenizer_path)
