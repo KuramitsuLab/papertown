@@ -63,7 +63,7 @@ def main_store():
         split=hparams.split,
         split_args=hparams.split_args or {},
         block_size=hparams.block_size, 
-        store_path=None, 
+        store_path=hparams.store_path, 
         verbose=True, 
         histogram=hparams.histogram
     )
