@@ -58,7 +58,7 @@ def get_filebase(filename):
 def zopen(filepath):
     if filepath.endswith('.gz'):
         return gzip.open(filepath, 'rt')
-    elif filepath.endswith('.zstd'):
+    elif filepath.endswith('.zst'):
         return pyzstd.open(filepath, 'rt')
     else:
         return open(filepath, 'r')
