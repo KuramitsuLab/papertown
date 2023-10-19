@@ -31,9 +31,7 @@ def _record_tokens(counts):
 def _update_fn(blocks: List[List[int]]):
     return blocks
 
-
 empty_tokens = []
-
 
 class DefaultSplitter(object):
 
@@ -413,6 +411,20 @@ class DatasetStore(object):
             self.append(block)
         return []   
 
+def append_valid_file(val_files: List[str], filename: str):
+    if '_train' in filename:
+        filename2 = filename.replace('_train', '_valid')
+        if os.path.isfile(filename2):
+            val_files.append(filename2)
+            return
+        filename2 = filename.replace('_train', '_dev')
+        if os.path.isfile(filename2):
+            val_files.append(filename2)
+            return
+        filename2 = filename.replace('_train', '_val')
+        if os.path.isfile(filename2):
+            val_files.append(filename2)
+            return
 
 def split_to_store(filenames, N=-1,
                    desc=None,
@@ -431,11 +443,13 @@ def split_to_store(filenames, N=-1,
     else:
         tokenizer = tokenizer_path
 
-    filebase = get_filebase(filenames[0])
     if store_path is None:
+        filebase = get_filebase(filenames[0])
         _, _, tokenizer_name = tokenizer_path.rpartition('/')
         store_path=f'{tokenizer_name}/{filebase}'
         verbose_print(f'Saving To.. {store_path}')
+    else:
+        filebase = store_path.replace('/', '_')
 
     splitter = new_TextSplitter(tokenizer, training_type,
                                 format=format, block_size=block_size, 
@@ -447,13 +461,17 @@ def split_to_store(filenames, N=-1,
 
     if desc:
         store.config['desc'] = desc
+    store.config['source'] = filenames
     store.config['tokenizer_path'] = str(tokenizer.name_or_path)
     store.config['tokenizer'] = record_tokenizer(tokenizer)
     store.config['splitter'] = splitter.about()
 
+    val_files = []
     for filename in filenames:
         iterator = file_iterator(filename, N=N)
         splitter.split_iter(iterator=iterator, update_fn=store.extend)
+        append_valid_file(val_files, filename)
+
     if shuffle:
         verbose_print('シャッフルします')
         shuffle_chunk_files(store.chunk_files, random_seed=random_seed)
@@ -462,6 +480,19 @@ def split_to_store(filenames, N=-1,
     print(store.config)
     if histogram:
         make_histogram(tokenizer, store_path, store.chunk_files, verbose=verbose)
+    if len(val_files) > 0:
+        verbose_print('split="valid"も作成します')
+        split_to_store(val_files, 
+                       desc=desc,
+                       tokenizer_path=tokenizer, 
+                       training_type=training_type,
+                       format=format, 
+                       split='valid',
+                       block_size=block_size,   
+                       shuffle=shuffle, random_seed=random_seed,
+                       store_path=store_path, 
+                       verbose=verbose, histogram=False,
+                       split_args=split_args)
 
 
 def make_histogram(tokenizer, store_path, chunk_files, verbose=True):
